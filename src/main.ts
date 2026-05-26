@@ -1,0 +1,73 @@
+import { NestFactory } from '@nestjs/core';
+import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import compression from '@fastify/compress';
+import helmet from '@fastify/helmet';
+import { AppModule } from './app.module';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+
+async function bootstrap() {
+  const adapter = new FastifyAdapter({ logger: process.env.NODE_ENV !== 'production' });
+  // Expose rawBody pour la vérification de signature webhook (remplace le parser JSON par défaut)
+  adapter.getInstance().addHook('preValidation', async (req: any) => {
+    if (req.headers['content-type']?.includes('application/json') && typeof req.body === 'object') {
+      try { (req as any).rawBody = JSON.stringify(req.body); } catch {}
+    }
+  });
+
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter);
+
+  const config = app.get(ConfigService);
+
+  // Security
+  await app.register(helmet as any, { contentSecurityPolicy: false });
+  await app.register(compression as any);
+
+  // CORS
+  app.enableCors({
+    origin: [
+      config.get('FRONTEND_URL', 'http://localhost:3000'),
+      config.get('PASSENGER_URL', 'http://localhost:3002'),
+    ],
+    credentials: true,
+  });
+
+  // Global pipes, filters, interceptors
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new LoggingInterceptor(), new TransformInterceptor());
+
+  // API versioning
+  app.enableVersioning({ type: VersioningType.URI });
+  app.setGlobalPrefix('api');
+
+  // Swagger docs
+  if (process.env.NODE_ENV !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('TransPro API')
+      .setDescription('API de gestion des compagnies de transport - Côte d\'Ivoire')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('docs', app, document);
+  }
+
+  const port = config.get<number>('API_PORT', 3001);
+  await app.listen(port, '0.0.0.0');
+  console.log(`TransPro API running on http://localhost:${port}`);
+  console.log(`Swagger docs: http://localhost:${port}/docs`);
+}
+
+bootstrap();
