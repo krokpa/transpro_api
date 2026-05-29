@@ -136,6 +136,46 @@ export const createMockPrisma = () => ({
     updateMany: jest.fn(),
     deleteMany: jest.fn(),
   },
+  subscription: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    count: jest.fn(),
+  },
+  driver: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    count: jest.fn(),
+  },
+  station: {
+    findFirst: jest.fn(),
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    count: jest.fn(),
+  },
+  refund: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    createMany: jest.fn(),
+    update: jest.fn(),
+    count: jest.fn(),
+  },
+  auditLog: {
+    create: jest.fn(),
+    findMany: jest.fn(),
+    count: jest.fn(),
+  },
+  webPushSubscription: {
+    findMany: jest.fn(),
+    deleteMany: jest.fn(),
+    upsert: jest.fn(),
+  },
   $transaction: jest.fn((fn: any) => {
     if (typeof fn === 'function') return fn(createMockPrisma());
     return Promise.all(fn);

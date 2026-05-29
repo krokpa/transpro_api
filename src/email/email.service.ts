@@ -105,6 +105,35 @@ export class EmailService {
     });
   }
 
+  async sendSubscriptionPaymentSuccess(
+    to: string,
+    firstName: string,
+    companyName: string,
+    plan: string,
+    amount: number,
+    endDate: Date,
+    dashboardUrl: string,
+  ) {
+    await this.send({
+      to,
+      subject: `Paiement confirmé — Abonnement ${plan} TransPro CI`,
+      html: this.subscriptionPaymentSuccessTemplate(firstName, companyName, plan, amount, endDate, dashboardUrl),
+    });
+  }
+
+  async sendSubscriptionPaymentFailed(
+    to: string,
+    firstName: string,
+    companyName: string,
+    retryUrl: string,
+  ) {
+    await this.send({
+      to,
+      subject: 'Échec du paiement — Abonnement TransPro CI',
+      html: this.subscriptionPaymentFailedTemplate(firstName, companyName, retryUrl),
+    });
+  }
+
   async sendParcelCreated(to: string, params: {
     senderName: string;
     trackingCode: string;
@@ -347,6 +376,45 @@ export class EmailService {
       </div>
       <p>${p.message}</p>
       <p style="text-align:center"><a href="${p.trackingUrl}" class="btn">Suivre mon colis</a></p>
+    `);
+  }
+
+  private subscriptionPaymentSuccessTemplate(
+    firstName: string,
+    companyName: string,
+    plan: string,
+    amount: number,
+    endDate: Date,
+    dashboardUrl: string,
+  ) {
+    const formattedAmount = new Intl.NumberFormat('fr-CI').format(amount) + ' FCFA';
+    const formattedDate   = new Intl.DateTimeFormat('fr-CI', { day: '2-digit', month: 'long', year: 'numeric' }).format(endDate);
+    return this.base(`
+      <p>Bonjour <strong>${firstName}</strong>,</p>
+      <p>🎉 Votre paiement d'abonnement a bien été reçu. Merci pour votre confiance !</p>
+      <div class="info-box">
+        <div class="info-row"><span class="label">Compagnie</span><span class="value">${companyName}</span></div>
+        <div class="info-row"><span class="label">Plan</span><span class="value">${plan}</span></div>
+        <div class="info-row"><span class="label">Montant payé</span><span class="value" style="color:#059669;font-weight:700">${formattedAmount}</span></div>
+        <div class="info-row"><span class="label">Valide jusqu'au</span><span class="value">${formattedDate}</span></div>
+      </div>
+      <p>Votre espace TransPro CI est pleinement actif. Bonne gestion !</p>
+      <p style="text-align:center"><a href="${dashboardUrl}" class="btn">Accéder au dashboard</a></p>
+    `);
+  }
+
+  private subscriptionPaymentFailedTemplate(
+    firstName: string,
+    companyName: string,
+    retryUrl: string,
+  ) {
+    return this.base(`
+      <p>Bonjour <strong>${firstName}</strong>,</p>
+      <p>⚠️ Le paiement de votre abonnement pour <strong>${companyName}</strong> n'a pas pu aboutir.</p>
+      <p>Cela peut être dû à un solde insuffisant, une connexion interrompue ou un refus de l'opérateur.</p>
+      <p>Veuillez réessayer depuis votre espace abonnement :</p>
+      <p style="text-align:center"><a href="${retryUrl}" class="btn">Réessayer le paiement</a></p>
+      <p style="color:#6b7280;font-size:13px">Si le problème persiste, contactez notre support : <a href="mailto:support@transpro.ci">support@transpro.ci</a></p>
     `);
   }
 }

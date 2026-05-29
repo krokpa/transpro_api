@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { createMockPrisma } from '../../common/test/mock-prisma';
 import { NotificationType, UserRole } from '@transpro/shared';
+import { PlanLimitsService } from '../../common/plan-limits.service';
 
 jest.mock('bcryptjs', () => ({
   hash: jest.fn().mockResolvedValue('hashed-password'),
@@ -13,6 +14,7 @@ jest.mock('bcryptjs', () => ({
 
 const mockPrisma        = createMockPrisma();
 const mockNotifications = { create: jest.fn().mockResolvedValue({}) };
+const mockPlanLimits    = { assertLimit: jest.fn().mockResolvedValue(undefined) };
 
 const TENANT_ID  = 'tenant-1';
 const TARGET_ID  = 'user-target';
@@ -41,11 +43,14 @@ describe('UsersService', () => {
         UsersService,
         { provide: PrismaService,       useValue: mockPrisma        },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: PlanLimitsService,    useValue: mockPlanLimits    },
       ],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
     jest.clearAllMocks();
+    // Remettre la valeur par défaut après clearAllMocks
+    mockPlanLimits.assertLimit.mockResolvedValue(undefined);
   });
 
   // ── inviteTeamMember ──────────────────────────────────────────────────────────
@@ -60,6 +65,7 @@ describe('UsersService', () => {
     };
 
     it('should create a new team member and send TEAM_MEMBER_INVITED notification', async () => {
+      mockPlanLimits.assertLimit.mockResolvedValue(undefined);
       mockPrisma.user.findUnique.mockResolvedValue(null);
       mockPrisma.tenant.findUnique.mockResolvedValue(mockTenant);
       mockPrisma.user.create.mockResolvedValue({ ...mockUser, email: dto.email });
@@ -77,10 +83,19 @@ describe('UsersService', () => {
     });
 
     it('should throw ConflictException when email is already registered', async () => {
+      mockPlanLimits.assertLimit.mockResolvedValue(undefined);
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
       await expect(service.inviteTeamMember(TENANT_ID, dto)).rejects.toThrow(ConflictException);
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw ForbiddenException when plan user limit is reached', async () => {
+      mockPlanLimits.assertLimit.mockRejectedValue(
+        new (require('@nestjs/common').ForbiddenException)('Limite atteinte'),
+      );
+      await expect(service.inviteTeamMember(TENANT_ID, dto)).rejects.toThrow('Limite atteinte');
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
     });
 
     it('should throw BadRequestException for a SUPER_ADMIN role', async () => {
