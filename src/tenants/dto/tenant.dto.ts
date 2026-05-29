@@ -1,4 +1,5 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TenantPlan, TenantStatus } from '@transpro/shared';
 
@@ -47,6 +48,18 @@ export class CreateTenantDto {
   @IsOptional()
   @IsString()
   logo?: string;
+
+  @ApiPropertyOptional({ description: 'Latitude GPS' })
+  @IsOptional()
+  @IsNumber()
+  @Transform(({ value }) => (value === null || value === undefined ? undefined : Number(value)))
+  latitude?: number;
+
+  @ApiPropertyOptional({ description: 'Longitude GPS' })
+  @IsOptional()
+  @IsNumber()
+  @Transform(({ value }) => (value === null || value === undefined ? undefined : Number(value)))
+  longitude?: number;
 }
 
 export class UpdateTenantDto {
@@ -90,4 +103,16 @@ export class UpdateTenantDto {
   @IsOptional()
   @IsEnum(TenantStatus)
   status?: TenantStatus;
+
+  @ApiPropertyOptional({ description: 'Latitude GPS' })
+  @IsOptional()
+  @IsNumber()
+  @Transform(({ value }) => (value === null || value === undefined ? undefined : Number(value)))
+  latitude?: number;
+
+  @ApiPropertyOptional({ description: 'Longitude GPS' })
+  @IsOptional()
+  @IsNumber()
+  @Transform(({ value }) => (value === null || value === undefined ? undefined : Number(value)))
+  longitude?: number;
 }

@@ -105,6 +105,38 @@ export class EmailService {
     });
   }
 
+  async sendParcelCreated(to: string, params: {
+    senderName: string;
+    trackingCode: string;
+    description: string;
+    weightKg: number;
+    deliveryCity: string;
+    fee: number;
+    trackingUrl: string;
+  }) {
+    await this.send({
+      to,
+      subject: `Colis enregistré ${params.trackingCode} — TransPro CI`,
+      html: this.parcelCreatedTemplate(params),
+    });
+  }
+
+  async sendParcelStatusUpdate(to: string, params: {
+    senderName: string;
+    trackingCode: string;
+    status: string;
+    statusLabel: string;
+    deliveryCity: string;
+    message: string;
+    trackingUrl: string;
+  }) {
+    await this.send({
+      to,
+      subject: `Colis ${params.trackingCode} — ${params.statusLabel} — TransPro CI`,
+      html: this.parcelStatusTemplate(params),
+    });
+  }
+
   private async send(mail: { to: string; subject: string; html: string }) {
     try {
       await this.transporter.sendMail({
@@ -255,6 +287,66 @@ export class EmailService {
       <p>Vos données et paramètres sont intacts. Renouvelez votre abonnement pour reprendre l'activité immédiatement.</p>
       <p style="text-align:center"><a href="${renewUrl}" class="btn">Renouveler et réactiver</a></p>
       <p style="font-size:13px;color:#6b7280">Besoin d'aide ? Contactez notre support à <a href="mailto:support@transpro.ci">support@transpro.ci</a></p>
+    `);
+  }
+
+  // ── Parcel templates ────────────────────────────────────────────────────────
+
+  private parcelCreatedTemplate(p: {
+    senderName: string;
+    trackingCode: string;
+    description: string;
+    weightKg: number;
+    deliveryCity: string;
+    fee: number;
+    trackingUrl: string;
+  }) {
+    const fmtFee = new Intl.NumberFormat('fr-CI').format(p.fee);
+    return this.base(`
+      <p>Bonjour <strong>${p.senderName}</strong>,</p>
+      <p>Votre colis a bien été enregistré sur <strong>TransPro CI</strong>. Conservez le code de suivi ci-dessous pour suivre son acheminement.</p>
+      <div class="info-box">
+        <div class="info-row"><span class="label">Code de suivi</span><span class="value" style="font-size:18px;font-weight:700;color:#f05a1a;letter-spacing:1px">${p.trackingCode}</span></div>
+        <div class="info-row"><span class="label">Description</span><span class="value">${p.description}</span></div>
+        <div class="info-row"><span class="label">Poids</span><span class="value">${p.weightKg} kg</span></div>
+        <div class="info-row"><span class="label">Destination</span><span class="value">${p.deliveryCity}</span></div>
+        <div class="info-row"><span class="label">Frais d'envoi</span><span class="value">${fmtFee} FCFA</span></div>
+      </div>
+      <p style="text-align:center"><a href="${p.trackingUrl}" class="btn">Suivre mon colis</a></p>
+      <p style="font-size:13px;color:#6b7280">Vous recevrez un email à chaque étape : prise en charge, transit, arrivée et livraison.</p>
+    `);
+  }
+
+  private parcelStatusTemplate(p: {
+    senderName: string;
+    trackingCode: string;
+    status: string;
+    statusLabel: string;
+    deliveryCity: string;
+    message: string;
+    trackingUrl: string;
+  }) {
+    const statusColors: Record<string, string> = {
+      COLLECTED:  '#3b82f6',
+      IN_TRANSIT: '#8b5cf6',
+      ARRIVED:    '#f59e0b',
+      DELIVERED:  '#16a34a',
+      RETURNED:   '#ef4444',
+    };
+    const color = statusColors[p.status] ?? '#6b7280';
+    return this.base(`
+      <p>Bonjour <strong>${p.senderName}</strong>,</p>
+      <p>Une mise à jour est disponible pour votre colis :</p>
+      <div class="info-box">
+        <div class="info-row"><span class="label">Code de suivi</span><span class="value">${p.trackingCode}</span></div>
+        <div class="info-row">
+          <span class="label">Statut</span>
+          <span class="value" style="color:${color};font-weight:700">${p.statusLabel}</span>
+        </div>
+        <div class="info-row"><span class="label">Destination</span><span class="value">${p.deliveryCity}</span></div>
+      </div>
+      <p>${p.message}</p>
+      <p style="text-align:center"><a href="${p.trackingUrl}" class="btn">Suivre mon colis</a></p>
     `);
   }
 }

@@ -5,7 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { createMockPrisma } from '../../common/test/mock-prisma';
-import { TripStatus } from '@transpro/shared';
+import { NotificationType, TripStatus } from '@transpro/shared';
 
 const mockPrisma = createMockPrisma();
 const mockRealtime = {
@@ -18,6 +18,7 @@ const mockNotifications = { create: jest.fn().mockResolvedValue({}) };
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const TENANT_ID = 'tenant-1';
+const LOGO_URL  = 'https://example.com/logo.png';
 
 const mockRoute = {
   id: 'route-1',
@@ -57,6 +58,15 @@ const mockTrip = {
   departureStationId: null,
 };
 
+/** Full trip shape returned by findUnique after an updateStatus call */
+const fullMockTrip = {
+  ...mockTrip,
+  route: mockRoute,
+  vehicle: mockVehicle,
+  driver: null,
+  tenant: { logo: LOGO_URL },
+};
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('TripsService', () => {
@@ -66,8 +76,8 @@ describe('TripsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TripsService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: RealtimeService, useValue: mockRealtime },
+        { provide: PrismaService,       useValue: mockPrisma        },
+        { provide: RealtimeService,     useValue: mockRealtime      },
         { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
@@ -155,7 +165,7 @@ describe('TripsService', () => {
       const departure = new Date(dto.departureAt).getTime();
       const expected = departure + 240 * 60 * 1000;
       const actual = new Date(createCall.data.estimatedArrivalAt).getTime();
-      expect(Math.abs(actual - expected)).toBeLessThan(1000); // within 1 second
+      expect(Math.abs(actual - expected)).toBeLessThan(1000);
     });
 
     it('should set departureStationId when provided', async () => {
@@ -257,7 +267,7 @@ describe('TripsService', () => {
     it('should update trip status and broadcast', async () => {
       mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
       mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'BOARDING' });
-      mockPrisma.trip.findUnique.mockResolvedValue({ ...mockTrip, status: 'BOARDING', route: mockRoute, vehicle: mockVehicle, driver: null });
+      mockPrisma.trip.findUnique.mockResolvedValue({ ...fullMockTrip, status: 'BOARDING' });
 
       await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.BOARDING });
 
@@ -274,7 +284,8 @@ describe('TripsService', () => {
     it('should set actualDepartureAt when status becomes DEPARTED', async () => {
       mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
       mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'DEPARTED' });
-      mockPrisma.trip.findUnique.mockResolvedValue({ ...mockTrip, route: mockRoute, vehicle: mockVehicle, driver: null });
+      mockPrisma.trip.findUnique.mockResolvedValue(fullMockTrip);
+      mockPrisma.booking.findMany.mockResolvedValue([]);
 
       await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.DEPARTED });
 
@@ -285,7 +296,8 @@ describe('TripsService', () => {
     it('should set actualArrivalAt when status becomes ARRIVED', async () => {
       mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
       mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'ARRIVED' });
-      mockPrisma.trip.findUnique.mockResolvedValue({ ...mockTrip, route: mockRoute, vehicle: mockVehicle, driver: null });
+      mockPrisma.trip.findUnique.mockResolvedValue(fullMockTrip);
+      mockPrisma.booking.findMany.mockResolvedValue([]);
 
       await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.ARRIVED });
 
@@ -293,10 +305,44 @@ describe('TripsService', () => {
       expect(updateData).toHaveProperty('actualArrivalAt');
     });
 
+    it('should notify confirmed passengers with TRIP_DEPARTED and origin/destination templateData', async () => {
+      mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
+      mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'DEPARTED' });
+      mockPrisma.trip.findUnique.mockResolvedValue(fullMockTrip);
+      mockPrisma.booking.findMany.mockResolvedValue([
+        { id: 'b1', passengerId: 'u1' },
+        { id: 'b2', passengerId: 'u2' },
+      ]);
+
+      await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.DEPARTED });
+
+      expect(mockNotifications.create).toHaveBeenCalledTimes(2);
+      expect(mockNotifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: NotificationType.TRIP_DEPARTED,
+          templateData: { origin: 'Abidjan', destination: 'Bouaké' },
+          companyLogo: LOGO_URL,
+        }),
+      );
+    });
+
+    it('should notify confirmed passengers with TRIP_ARRIVED when status becomes ARRIVED', async () => {
+      mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
+      mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'ARRIVED' });
+      mockPrisma.trip.findUnique.mockResolvedValue(fullMockTrip);
+      mockPrisma.booking.findMany.mockResolvedValue([{ id: 'b1', passengerId: 'u1' }]);
+
+      await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.ARRIVED });
+
+      expect(mockNotifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({ type: NotificationType.TRIP_ARRIVED }),
+      );
+    });
+
     it('should notify passengers when trip is cancelled', async () => {
       mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
       mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'CANCELLED' });
-      mockPrisma.trip.findUnique.mockResolvedValue({ ...mockTrip, route: mockRoute, vehicle: mockVehicle, driver: null });
+      mockPrisma.trip.findUnique.mockResolvedValue(fullMockTrip);
       mockPrisma.booking.findMany.mockResolvedValue([
         { id: 'b1', passengerId: 'u1' },
         { id: 'b2', passengerId: 'u2' },
@@ -306,20 +352,42 @@ describe('TripsService', () => {
 
       expect(mockNotifications.create).toHaveBeenCalledTimes(2);
       expect(mockNotifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'TRIP_CANCELLED' }),
+        expect.objectContaining({
+          type: NotificationType.TRIP_CANCELLED,
+          templateData: {},
+          companyLogo: LOGO_URL,
+        }),
       );
     });
 
-    it('should notify passengers when delay is set', async () => {
+    it('should notify passengers when delay is set with delayMinutes templateData', async () => {
       mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
       mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, delayMinutes: 30 });
-      mockPrisma.trip.findUnique.mockResolvedValue({ ...mockTrip, route: mockRoute, vehicle: mockVehicle, driver: null });
+      mockPrisma.trip.findUnique.mockResolvedValue(fullMockTrip);
       mockPrisma.booking.findMany.mockResolvedValue([{ id: 'b1', passengerId: 'u1' }]);
 
       await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.DELAYED, delayMinutes: 30 });
 
       expect(mockNotifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'TRIP_DELAYED' }),
+        expect.objectContaining({
+          type: NotificationType.TRIP_DELAYED,
+          templateData: expect.objectContaining({ delayMinutes: '30' }),
+          companyLogo: LOGO_URL,
+        }),
+      );
+    });
+
+    it('should not send logo when tenant logo is a base64 data URI', async () => {
+      const noLogoTrip = { ...fullMockTrip, tenant: { logo: 'data:image/png;base64,iVBOR...' } };
+      mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
+      mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'CANCELLED' });
+      mockPrisma.trip.findUnique.mockResolvedValue(noLogoTrip);
+      mockPrisma.booking.findMany.mockResolvedValue([{ id: 'b1', passengerId: 'u1' }]);
+
+      await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.CANCELLED });
+
+      expect(mockNotifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({ companyLogo: undefined }),
       );
     });
 

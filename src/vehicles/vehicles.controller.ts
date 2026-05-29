@@ -7,6 +7,8 @@ import {
   Body,
   Param,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { VehiclesService } from './vehicles.service';
@@ -57,5 +59,71 @@ export class VehiclesController {
   @ApiOperation({ summary: 'Désactiver un véhicule' })
   remove(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
     return this.vehiclesService.remove(id, tenantId);
+  }
+
+  // ── Maintenance alerts ─────────────────────────────────────────────────────
+
+  @Get('maintenance-alerts')
+  @ApiOperation({ summary: 'Véhicules nécessitant une révision dans les 30 jours' })
+  getMaintenanceAlerts(@CurrentUser('tenantId') tenantId: string) {
+    return this.vehiclesService.getMaintenanceAlerts(tenantId);
+  }
+
+  // ── Fuel logs ──────────────────────────────────────────────────────────────
+
+  @Get(':id/fuel-logs')
+  @ApiOperation({ summary: 'Historique carburant d\'un véhicule' })
+  getFuelLogs(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.vehiclesService.getFuelLogs(id, tenantId);
+  }
+
+  @Post(':id/fuel-logs')
+  @ApiOperation({ summary: 'Enregistrer un plein de carburant' })
+  addFuelLog(
+    @Param('id') id: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @Body() dto: any,
+  ) {
+    return this.vehiclesService.addFuelLog(id, tenantId, dto);
+  }
+
+  @Delete(':id/fuel-logs/:logId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer un log carburant' })
+  deleteFuelLog(
+    @Param('id') id: string,
+    @Param('logId') logId: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.vehiclesService.deleteFuelLog(id, logId, tenantId);
+  }
+
+  // ── Maintenance logs ───────────────────────────────────────────────────────
+
+  @Get(':id/maintenance-logs')
+  @ApiOperation({ summary: 'Historique entretien d\'un véhicule' })
+  getMaintenanceLogs(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.vehiclesService.getMaintenanceLogs(id, tenantId);
+  }
+
+  @Post(':id/maintenance-logs')
+  @ApiOperation({ summary: 'Enregistrer une opération de maintenance' })
+  addMaintenanceLog(
+    @Param('id') id: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @Body() dto: any,
+  ) {
+    return this.vehiclesService.addMaintenanceLog(id, tenantId, dto);
+  }
+
+  @Delete(':id/maintenance-logs/:logId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer un log maintenance' })
+  deleteMaintenanceLog(
+    @Param('id') id: string,
+    @Param('logId') logId: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.vehiclesService.deleteMaintenanceLog(id, logId, tenantId);
   }
 }

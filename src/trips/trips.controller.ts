@@ -31,6 +31,13 @@ export class TripsController {
     return this.trips.search(dto);
   }
 
+  @Public()
+  @Get('upcoming')
+  @ApiOperation({ summary: 'Prochains départs disponibles (passagers)' })
+  upcoming(@Query('limit') limit?: string) {
+    return this.trips.upcoming(limit ? parseInt(limit, 10) : 10);
+  }
+
   @Post()
   @ApiBearerAuth()
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
@@ -44,13 +51,15 @@ export class TripsController {
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
   @ApiOperation({ summary: 'Lister les voyages de la compagnie' })
   findAll(
-    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser() currentUser: any,
     @Query('status') status?: TripStatus,
     @Query('routeId') routeId?: string,
     @Query('date') date?: string,
     @Query('tripClass') tripClass?: string,
   ) {
-    return this.trips.findAll(tenantId, { status, routeId, date, tripClass });
+    const stationId =
+      currentUser.role === UserRole.COMPANY_AGENT ? (currentUser.stationId ?? null) : null;
+    return this.trips.findAll(currentUser.tenantId, { status, routeId, date, tripClass, stationId });
   }
 
   @Get(':id')
@@ -89,6 +98,14 @@ export class TripsController {
     @CurrentUser('tenantId') tenantId: string,
   ) {
     return this.trips.toggleSeatBlock(id, tenantId, seatNumber);
+  }
+
+  @Get(':id/manifest')
+  @ApiBearerAuth()
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @ApiOperation({ summary: 'Manifeste des passagers d\'un voyage' })
+  getManifest(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.trips.manifest(id, tenantId);
   }
 
   @Get(':id/seats/:seatNumber/booking')

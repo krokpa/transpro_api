@@ -98,10 +98,43 @@ export const createMockPrisma = () => ({
   },
   notification: {
     findMany: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
     count: jest.fn(),
+  },
+  parcel: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    count: jest.fn(),
+  },
+  tripRating: {
+    upsert: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+  },
+  bookingLuggage: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    count: jest.fn(),
+  },
+  luggageBag: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    createMany: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    deleteMany: jest.fn(),
   },
   $transaction: jest.fn((fn: any) => {
     if (typeof fn === 'function') return fn(createMockPrisma());

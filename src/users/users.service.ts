@@ -7,8 +7,9 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { UpdateUserDto, InviteTeamMemberDto } from './dto/user.dto';
-import { UserRole } from '@transpro/shared';
+import { UserRole, NotificationType } from '@transpro/shared';
 
 const MEMBER_SELECT = {
   id: true,
@@ -20,12 +21,16 @@ const MEMBER_SELECT = {
   isActive: true,
   isVerified: true,
   lastLoginAt: true,
+  avatar: true,
   createdAt: true,
 };
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   async findAll(tenantId: string) {
     return this.prisma.user.findMany({
@@ -50,9 +55,17 @@ export class UsersService {
         isVerified: true,
         preferredLang: true,
         lastLoginAt: true,
+        avatar: true,
         createdAt: true,
         tenant: {
           select: { id: true, name: true, slug: true, logo: true, plan: true, status: true },
+        },
+        userStations: {
+          select: {
+            isPrimary: true,
+            stationId: true,
+            station: { select: { id: true, name: true } },
+          },
         },
       },
     });
@@ -65,8 +78,24 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id },
       data: dto,
-      select: { id: true, email: true, phone: true, firstName: true, lastName: true, role: true, preferredLang: true, updatedAt: true },
+      select: { id: true, email: true, phone: true, firstName: true, lastName: true, role: true, preferredLang: true, avatar: true, updatedAt: true },
     });
+  }
+
+  async updateAvatar(id: string, avatar: string) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { avatar },
+      select: { id: true, avatar: true },
+    });
+  }
+
+  async lookupByPhone(phone: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { phone },
+      select: { id: true, firstName: true, lastName: true, email: true, phone: true, avatar: true, role: true },
+    });
+    return user ?? null;
   }
 
   async changePassword(id: string, currentPassword: string, newPassword: string) {
@@ -104,8 +133,13 @@ export class UsersService {
       throw new BadRequestException('Rôle non autorisé pour un membre de l\'équipe');
     }
 
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true, logo: true },
+    });
+
     const hash = await bcrypt.hash(dto.password, 12);
-    return this.prisma.user.create({
+    const newUser = await this.prisma.user.create({
       data: {
         email: dto.email,
         firstName: dto.firstName,
@@ -119,6 +153,16 @@ export class UsersService {
       },
       select: MEMBER_SELECT,
     });
+
+    this.notifications.create({
+      userId: newUser.id,
+      type: NotificationType.TEAM_MEMBER_INVITED,
+      templateData: { companyName: tenant?.name ?? '' },
+      data: { tenantId },
+      companyLogo: tenant?.logo ?? undefined,
+    }).catch(() => {});
+
+    return newUser;
   }
 
   async updateRole(targetUserId: string, tenantId: string, role: UserRole) {
@@ -130,11 +174,24 @@ export class UsersService {
     const allowed = [UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT];
     if (!allowed.includes(role)) throw new BadRequestException('Rôle invalide');
 
-    return this.prisma.user.update({
-      where: { id: targetUserId },
-      data: { role },
-      select: { id: true, role: true },
-    });
+    const [updated, tenant] = await Promise.all([
+      this.prisma.user.update({
+        where: { id: targetUserId },
+        data: { role },
+        select: { id: true, role: true },
+      }),
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, logo: true } }),
+    ]);
+
+    this.notifications.create({
+      userId: targetUserId,
+      type: NotificationType.TEAM_ROLE_CHANGED,
+      templateData: { companyName: tenant?.name ?? '' },
+      data: { tenantId, role },
+      companyLogo: tenant?.logo ?? undefined,
+    }).catch(() => {});
+
+    return updated;
   }
 
   async removeFromTenant(targetUserId: string, tenantId: string) {
@@ -143,10 +200,40 @@ export class UsersService {
     if (user.role === UserRole.COMPANY_OWNER) {
       throw new BadRequestException('Impossible de retirer le propriétaire de la compagnie');
     }
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true, logo: true },
+    });
+
     await this.prisma.user.update({
       where: { id: targetUserId },
       data: { tenantId: null, role: UserRole.PASSENGER },
     });
+
+    this.notifications.create({
+      userId: targetUserId,
+      type: NotificationType.TEAM_MEMBER_REMOVED,
+      templateData: { companyName: tenant?.name ?? '' },
+      data: { tenantId },
+      companyLogo: tenant?.logo ?? undefined,
+    }).catch(() => {});
+
     return { message: 'Membre retiré de la compagnie' };
+  }
+
+  async registerDeviceToken(userId: string, token: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { deviceTokens: true } });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+    const tokens = [...new Set([...user.deviceTokens, token])].slice(-5); // keep last 5
+    await this.prisma.user.update({ where: { id: userId }, data: { deviceTokens: tokens } });
+    return { registered: true };
+  }
+
+  async unregisterDeviceToken(userId: string, token: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { deviceTokens: true } });
+    if (!user) return { removed: false };
+    const tokens = user.deviceTokens.filter((t) => t !== token);
+    await this.prisma.user.update({ where: { id: userId }, data: { deviceTokens: tokens } });
+    return { removed: true };
   }
 }

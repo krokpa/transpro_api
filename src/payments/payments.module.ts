@@ -4,9 +4,10 @@ import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PushModule } from '../push/push.module';
 
 @Module({
-  imports: [ConfigModule, RealtimeModule, NotificationsModule],
+  imports: [ConfigModule, RealtimeModule, NotificationsModule, PushModule],
   controllers: [PaymentsController],
   providers: [PaymentsService],
   exports: [PaymentsService],

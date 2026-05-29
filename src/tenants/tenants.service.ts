@@ -92,6 +92,87 @@ export class TenantsService {
     return tenant;
   }
 
+  async findPublic() {
+    const [tenants, tripsAgg] = await Promise.all([
+      this.prisma.tenant.findMany({
+        where: { status: { in: ['ACTIVE', 'TRIAL'] } },
+        select: {
+          id: true, name: true, logo: true, slug: true, phone: true,
+          city: { select: { name: true } },
+          _count: {
+            select: {
+              stations: { where: { isActive: true } },
+              routes:   { where: { isActive: true } },
+            },
+          },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.trip.groupBy({
+        by: ['tenantId'],
+        where: {
+          status: { in: ['SCHEDULED', 'BOARDING'] },
+          departureAt: { gte: new Date() },
+          availableSeats: { gt: 0 },
+        },
+        _count: { id: true },
+      }),
+    ]);
+
+    const upcomingByTenant = new Map(tripsAgg.map((t) => [t.tenantId, t._count.id]));
+    return tenants.map((t) => ({ ...t, upcomingTrips: upcomingByTenant.get(t.id) ?? 0 }));
+  }
+
+  async findPublicProfile(slug: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { slug },
+      select: {
+        id: true, name: true, slug: true, logo: true, sigle: true,
+        phone: true, email: true, address: true,
+        latitude: true, longitude: true,
+        city: { select: { name: true } },
+        stations: {
+          where: { isActive: true },
+          select: {
+            id: true, name: true, address: true, phone: true, code: true,
+            latitude: true, longitude: true,
+            city: { select: { name: true } },
+          },
+          orderBy: { name: 'asc' },
+        },
+        routes: {
+          where: { isActive: true },
+          select: {
+            id: true, name: true, durationMinutes: true,
+            originCity: { select: { name: true } },
+            destinationCity: { select: { name: true } },
+          },
+          orderBy: { name: 'asc' },
+        },
+        _count: {
+          select: {
+            stations: { where: { isActive: true } },
+            routes: { where: { isActive: true } },
+          },
+        },
+      },
+    });
+
+    if (!tenant) throw new NotFoundException('Compagnie introuvable');
+
+    const now = new Date();
+    const upcomingTrips = await this.prisma.trip.count({
+      where: {
+        tenantId: tenant.id,
+        status: { in: ['SCHEDULED', 'BOARDING'] },
+        departureAt: { gte: now },
+        availableSeats: { gt: 0 },
+      },
+    });
+
+    return { ...tenant, upcomingTrips };
+  }
+
   async findAll() {
     return this.prisma.tenant.findMany({
       include: {
@@ -376,6 +457,33 @@ export class TenantsService {
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5);
 
+    // ── Fill rate per route ──────────────────────────────────────────────────
+    const tripsPerRoute = await this.prisma.trip.groupBy({
+      by: ['routeId'],
+      where: { tenantId, departureAt: { gte: start, lte: end } },
+      _sum: { totalSeats: true, availableSeats: true },
+    });
+    const routeFillRate = await Promise.all(
+      tripsPerRoute.map(async (r) => {
+        const route = await this.prisma.route.findUnique({
+          where: { id: r.routeId },
+          select: { name: true, originCity: { select: { name: true } }, destinationCity: { select: { name: true } } },
+        });
+        const total    = r._sum.totalSeats ?? 0;
+        const avail    = r._sum.availableSeats ?? 0;
+        const occupied = total - avail;
+        return {
+          routeId:     r.routeId,
+          name:        route?.name ?? '—',
+          origin:      (route as any)?.originCity?.name ?? '',
+          destination: (route as any)?.destinationCity?.name ?? '',
+          fillRate:    total > 0 ? Math.round((occupied / total) * 100) : 0,
+          totalSeats:  total,
+        };
+      }),
+    );
+    routeFillRate.sort((a, b) => b.fillRate - a.fillRate);
+
     // ── Booking status breakdown ─────────────────────────────────────────────
     const STATUS_LABELS: Record<string, string> = {
       PENDING: 'En attente', CONFIRMED: 'Confirmée',
@@ -410,6 +518,7 @@ export class TenantsService {
       kpis,
       timeline,
       topRoutes,
+      routeFillRate,
       statusBreakdown: statusData,
       paymentMethods,
       recentBookings,

@@ -30,6 +30,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         role: true,
         tenantId: true,
         isActive: true,
+        tenant: { select: { plan: true, status: true } },
+        userStations: {
+          where: { station: { isActive: true } },
+          select: { stationId: true, isPrimary: true },
+          orderBy: { isPrimary: 'desc' },
+          take: 1,
+        },
       },
     });
 
@@ -37,6 +44,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Compte désactivé ou introuvable');
     }
 
-    return user;
+    const { userStations, ...rest } = user;
+    return {
+      ...rest,
+      stationId: userStations[0]?.stationId ?? null,
+    };
   }
 }

@@ -29,10 +29,15 @@ export class CreateScheduleDto {
   @IsString()
   driverId?: string;
 
-  @ApiPropertyOptional({ description: 'Gare de départ (optionnel, pour filtrage station)' })
+  @ApiPropertyOptional({ description: 'Gare de départ (propagée aux voyages générés)' })
   @IsOptional()
   @IsString()
   departureStationId?: string;
+
+  @ApiPropertyOptional({ description: 'Gare d\'arrivée (propagée aux voyages générés)' })
+  @IsOptional()
+  @IsString()
+  arrivalStationId?: string;
 
   @ApiProperty({ example: 'Abidjan → Bouaké 08h00 Standard' })
   @IsString()
@@ -84,6 +89,16 @@ export class UpdateScheduleDto {
   @IsOptional()
   @IsString()
   driverId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  departureStationId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  arrivalStationId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

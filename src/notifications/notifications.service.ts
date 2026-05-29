@@ -2,14 +2,22 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationType, SocketEvent } from '@transpro/shared';
 import { RealtimeService } from '../realtime/realtime.service';
+import { PushService } from '../push/push.service';
+import { buildNotificationTranslations, getNotificationText } from './notification-i18n';
 
 export interface CreateNotificationDto {
   userId: string;
   type: NotificationType;
-  title: string;
-  message: string;
+  /** Direct title — required when templateData is not provided. */
+  title?: string;
+  /** Direct message — required when templateData is not provided. */
+  message?: string;
+  /** Variables for i18n template lookup. When set, title/message are derived from the template. */
+  templateData?: Record<string, string>;
   data?: Record<string, any>;
   channel?: 'IN_APP' | 'SMS' | 'EMAIL' | 'PUSH';
+  push?: boolean;
+  companyLogo?: string;
 }
 
 @Injectable()
@@ -17,6 +25,7 @@ export class NotificationsService {
   constructor(
     private prisma: PrismaService,
     private realtime: RealtimeService,
+    private push: PushService,
   ) {}
 
   async findByUser(userId: string, onlyUnread?: boolean) {
@@ -55,18 +64,37 @@ export class NotificationsService {
   }
 
   async create(dto: CreateNotificationDto) {
+    let resolvedTitle = dto.title ?? '';
+    let resolvedMessage = dto.message ?? '';
+    let translations: Record<string, { title: string; message: string }> | undefined;
+
+    if (dto.templateData !== undefined) {
+      translations = buildNotificationTranslations(dto.type, dto.templateData);
+
+      // Fetch the user's preferred language to store the right text in DB
+      const user = await this.prisma.user.findUnique({
+        where: { id: dto.userId },
+        select: { preferredLang: true },
+      });
+      const lang = user?.preferredLang ?? 'fr';
+      const text = getNotificationText(dto.type, dto.templateData, lang);
+      resolvedTitle   = text.title   || dto.title   || '';
+      resolvedMessage = text.message || dto.message || '';
+    }
+
     const notification = await this.prisma.notification.create({
       data: {
         userId: dto.userId,
         type: dto.type,
-        title: dto.title,
-        message: dto.message,
+        title: resolvedTitle,
+        message: resolvedMessage,
         data: dto.data ?? {},
         channel: dto.channel ?? 'IN_APP',
         isRead: false,
       },
     });
 
+    // Real-time in-app via WebSocket
     this.realtime.sendToUser(dto.userId, SocketEvent.NOTIFICATION, {
       id: notification.id,
       type: notification.type,
@@ -75,6 +103,17 @@ export class NotificationsService {
       data: notification.data,
       createdAt: notification.createdAt,
     });
+
+    // Push notification (opt-in via dto.push, defaults to true)
+    if (dto.push !== false) {
+      this.push.sendToUser(dto.userId, {
+        title: resolvedTitle,
+        message: resolvedMessage,
+        data: { notificationId: notification.id, type: dto.type, ...dto.data },
+        largeIconUrl: dto.companyLogo,
+        translations,
+      });
+    }
 
     return notification;
   }

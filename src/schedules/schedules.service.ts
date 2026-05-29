@@ -8,6 +8,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateScheduleDto, UpdateScheduleDto } from './dto/schedule.dto';
+import { CreateClosureDayDto } from './dto/closure.dto';
 import dayjs from 'dayjs';
 
 @Injectable()
@@ -36,6 +37,7 @@ export class SchedulesService {
         vehicleId: dto.vehicleId,
         driverId: dto.driverId,
         departureStationId: dto.departureStationId,
+        arrivalStationId:   dto.arrivalStationId,
         label: dto.label,
         departureTime: dto.departureTime,
         daysOfWeek: dto.daysOfWeek,
@@ -44,7 +46,13 @@ export class SchedulesService {
         amenities: dto.amenities ?? [],
         generateDaysAhead: dto.generateDaysAhead ?? 7,
       },
-      include: { route: true, vehicle: true, driver: true },
+      include: {
+        route: true,
+        vehicle: true,
+        driver: true,
+        departureStation: { select: { id: true, name: true } },
+        arrivalStation:   { select: { id: true, name: true } },
+      },
     });
   }
 
@@ -55,6 +63,8 @@ export class SchedulesService {
         route: { select: { name: true, originCity: { select: { name: true } }, destinationCity: { select: { name: true } } } },
         vehicle: { select: { plate: true, brand: true, model: true } },
         driver: { select: { firstName: true, lastName: true } },
+        departureStation: { select: { id: true, name: true } },
+        arrivalStation:   { select: { id: true, name: true } },
         _count: { select: { trips: true } },
       },
       orderBy: [{ isActive: 'desc' }, { departureTime: 'asc' }],
@@ -68,6 +78,8 @@ export class SchedulesService {
         route: true,
         vehicle: true,
         driver: true,
+        departureStation: { select: { id: true, name: true } },
+        arrivalStation:   { select: { id: true, name: true } },
         _count: { select: { trips: true } },
       },
     });
@@ -85,6 +97,8 @@ export class SchedulesService {
       data: {
         ...(dto.vehicleId !== undefined && { vehicleId: dto.vehicleId }),
         ...(dto.driverId !== undefined && { driverId: dto.driverId }),
+        ...(dto.departureStationId !== undefined && { departureStationId: dto.departureStationId || null }),
+        ...(dto.arrivalStationId   !== undefined && { arrivalStationId:   dto.arrivalStationId   || null }),
         ...(dto.label && { label: dto.label }),
         ...(dto.departureTime && { departureTime: dto.departureTime }),
         ...(dto.daysOfWeek && { daysOfWeek: dto.daysOfWeek }),
@@ -94,7 +108,13 @@ export class SchedulesService {
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
         ...(dto.generateDaysAhead !== undefined && { generateDaysAhead: dto.generateDaysAhead }),
       },
-      include: { route: true, vehicle: true, driver: true },
+      include: {
+        route: true,
+        vehicle: true,
+        driver: true,
+        departureStation: { select: { id: true, name: true } },
+        arrivalStation:   { select: { id: true, name: true } },
+      },
     });
   }
 
@@ -154,6 +174,76 @@ export class SchedulesService {
     return { created: totalCreated, skipped: totalSkipped };
   }
 
+  // ─── Jours fériés / Fermetures ─────────────────────────────────────────────
+
+  async createClosure(tenantId: string, dto: CreateClosureDayDto) {
+    return this.prisma.closureDay.create({
+      data: {
+        tenantId,
+        date: new Date(dto.date),
+        label: dto.label,
+        isRecurring: dto.isRecurring ?? false,
+      },
+    });
+  }
+
+  async findClosures(tenantId: string) {
+    return this.prisma.closureDay.findMany({
+      where: { tenantId },
+      orderBy: { date: 'asc' },
+    });
+  }
+
+  /** Liste les jours fériés nationaux CI (tenantId null). */
+  async findNationalHolidays() {
+    return this.prisma.closureDay.findMany({
+      where: { tenantId: null },
+      orderBy: { date: 'asc' },
+    });
+  }
+
+  async removeClosure(id: string, tenantId: string) {
+    const closure = await this.prisma.closureDay.findFirst({ where: { id, tenantId } });
+    if (!closure) throw new NotFoundException('Fermeture introuvable');
+    await this.prisma.closureDay.delete({ where: { id } });
+  }
+
+  /** Charge toutes les fermetures applicables à un tenant pour la période. */
+  private async loadClosuresForPeriod(
+    tenantId: string,
+    startDate: dayjs.Dayjs,
+    endDate: dayjs.Dayjs,
+    includeNational: boolean,
+  ): Promise<Set<string>> {
+    const where: any = {
+      OR: [
+        { tenantId, date: { gte: startDate.toDate(), lte: endDate.toDate() } },
+        ...(includeNational
+          ? [{ tenantId: null, date: { gte: startDate.toDate(), lte: endDate.toDate() } }]
+          : []),
+      ],
+    };
+
+    const closures = await this.prisma.closureDay.findMany({ where });
+    const set = new Set<string>();
+
+    for (const c of closures) {
+      if (c.isRecurring) {
+        // Pour les récurrents, on ajoute tous les MM-DD dans la période
+        for (let i = 0; i <= endDate.diff(startDate, 'day'); i++) {
+          const d = startDate.add(i, 'day');
+          const closureDate = dayjs(c.date);
+          if (d.month() === closureDate.month() && d.date() === closureDate.date()) {
+            set.add(d.format('YYYY-MM-DD'));
+          }
+        }
+      } else {
+        set.add(dayjs(c.date).format('YYYY-MM-DD'));
+      }
+    }
+    return set;
+  }
+
   private async _generateForSchedule(
     schedule: any,
     vehicle: any,
@@ -162,6 +252,15 @@ export class SchedulesService {
     const layout = vehicle.seatLayout as any;
     const seatConfigs: any[] = layout?.seats ?? [];
     const today = dayjs().startOf('day');
+    const endDate = today.add(daysAhead - 1, 'day');
+
+    // Charger les fermetures une seule fois pour toute la période
+    const closureDates = await this.loadClosuresForPeriod(
+      schedule.tenantId,
+      today,
+      endDate,
+      schedule.skipNationalHolidays ?? false,
+    );
 
     let created = 0;
     let skipped = 0;
@@ -171,6 +270,9 @@ export class SchedulesService {
       const dayOfWeek = targetDate.day();
 
       if (!schedule.daysOfWeek.includes(dayOfWeek)) { skipped++; continue; }
+
+      // Vérifier si le jour est fermé
+      if (closureDates.has(targetDate.format('YYYY-MM-DD'))) { skipped++; continue; }
 
       const [hours, minutes] = schedule.departureTime.split(':').map(Number);
       const departureAt = targetDate.hour(hours).minute(minutes).second(0).millisecond(0).toDate();
@@ -206,6 +308,7 @@ export class SchedulesService {
           totalSeats: vehicle.capacity,
           availableSeats: vehicle.capacity,
           ...(schedule.departureStationId && { departureStationId: schedule.departureStationId }),
+          ...(schedule.arrivalStationId   && { arrivalStationId:   schedule.arrivalStationId   }),
           seats: {
             create: seatConfigs.map((s: any) => ({
               seatNumber: s.number,

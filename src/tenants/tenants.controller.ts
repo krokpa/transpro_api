@@ -16,12 +16,27 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@transpro/shared';
+import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Tenants / Compagnies')
 @Controller({ path: 'tenants', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TenantsController {
   constructor(private tenantsService: TenantsService) {}
+
+  @Public()
+  @Get('public')
+  @ApiOperation({ summary: 'Lister les compagnies actives (public)' })
+  findPublic() {
+    return this.tenantsService.findPublic();
+  }
+
+  @Public()
+  @Get('slug/:slug')
+  @ApiOperation({ summary: 'Profil public d\'une compagnie par slug' })
+  findBySlug(@Param('slug') slug: string) {
+    return this.tenantsService.findPublicProfile(slug);
+  }
 
   @Post()
   @ApiBearerAuth()

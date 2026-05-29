@@ -10,6 +10,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { UserRole } from '@transpro/shared';
 
 @ApiTags('Gares')
@@ -21,6 +22,20 @@ export class StationsController {
     private stations: StationsService,
     private reports: ReportsService,
   ) {}
+
+  @Public()
+  @Get('by-city')
+  @ApiOperation({ summary: 'Lister les gares actives d\'une ville (public)' })
+  findByCity(@Query('city') city: string) {
+    return this.stations.findByCity(city ?? '');
+  }
+
+  @Public()
+  @Get(':id/info')
+  @ApiOperation({ summary: 'Détails publics d\'une gare (passagers)' })
+  findPublicInfo(@Param('id') id: string) {
+    return this.stations.findPublicInfo(id);
+  }
 
   @Post()
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)

@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { ValidationPipe, VersioningType, RequestMethod } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import compression from '@fastify/compress';
@@ -11,7 +11,10 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
-  const adapter = new FastifyAdapter({ logger: process.env.NODE_ENV !== 'production' });
+  const adapter = new FastifyAdapter({
+    logger: process.env.NODE_ENV !== 'production',
+    bodyLimit: 5 * 1024 * 1024, // 5 MB — accommodate base64-encoded logos
+  });
   // Expose rawBody pour la vérification de signature webhook (remplace le parser JSON par défaut)
   adapter.getInstance().addHook('preValidation', async (req: any) => {
     if (req.headers['content-type']?.includes('application/json') && typeof req.body === 'object') {
@@ -50,7 +53,12 @@ async function bootstrap() {
 
   // API versioning
   app.enableVersioning({ type: VersioningType.URI });
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('api', {
+    exclude: [
+      { path: 'passenger/payment/success', method: RequestMethod.GET },
+      { path: 'passenger/payment/error',   method: RequestMethod.GET },
+    ],
+  });
 
   // Swagger docs
   if (process.env.NODE_ENV !== 'production') {

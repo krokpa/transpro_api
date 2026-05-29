@@ -8,6 +8,7 @@ import {
   IsString,
   Min,
   ValidateNested,
+  IsBooleanString,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -87,6 +88,11 @@ export class CreateVehicleDto {
   @ValidateNested()
   @Type(() => SeatLayoutDto)
   seatLayout?: SeatLayoutDto;
+
+  @ApiPropertyOptional({ default: true, description: 'Activer la gestion avancée des sièges' })
+  @IsOptional()
+  @IsBoolean()
+  advancedSeatManagement?: boolean;
 }
 
 export class UpdateVehicleDto {
@@ -127,4 +133,9 @@ export class UpdateVehicleDto {
   @ValidateNested()
   @Type(() => SeatLayoutDto)
   seatLayout?: SeatLayoutDto;
+
+  @ApiPropertyOptional({ description: 'Activer/désactiver la gestion avancée des sièges' })
+  @IsOptional()
+  @IsBoolean()
+  advancedSeatManagement?: boolean;
 }

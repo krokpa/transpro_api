@@ -42,6 +42,17 @@ export class PaymentsController {
     return this.payments.checkStatusByBooking(bookingId, userId);
   }
 
+  @Post('bookings/:bookingId/confirm-from-redirect')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirmer le paiement depuis la redirection Genius Pay' })
+  confirmFromRedirect(
+    @Param('bookingId') bookingId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.payments.confirmFromRedirect(bookingId, userId);
+  }
+
   @Post('bookings/:bookingId/pay')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Initier le paiement via Genius Pay' })
@@ -53,6 +64,7 @@ export class PaymentsController {
   }
 
   @Public()
+  @Get('geniuspay/webhook')
   @Post('geniuspay/webhook')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook Genius Pay' })
@@ -70,5 +82,12 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Scanner un billet QR code' })
   scanTicket(@Body('qrData') qrData: string, @CurrentUser('id') agentId: string) {
     return this.payments.scanTicket(qrData, agentId);
+  }
+
+  @Patch('tickets/:ticketId/check-in')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Pointer un passager (check-in manuel)' })
+  checkIn(@Param('ticketId') ticketId: string, @CurrentUser('id') agentId: string) {
+    return this.payments.checkInTicket(ticketId, agentId);
   }
 }

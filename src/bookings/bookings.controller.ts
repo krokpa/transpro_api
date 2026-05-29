@@ -2,6 +2,7 @@ import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@n
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto, CreateGuichetBookingDto } from './dto/booking.dto';
+import { RateBookingDto } from './dto/rate-booking.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -42,6 +43,16 @@ export class BookingsController {
   @ApiOperation({ summary: 'Détail d\'une de mes réservations (passager)' })
   findMine(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.bookings.findOneForPassenger(id, userId);
+  }
+
+  @Post('my/:id/rate')
+  @ApiOperation({ summary: 'Noter un voyage terminé' })
+  rate(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: RateBookingDto,
+  ) {
+    return this.bookings.rateBooking(id, userId, dto);
   }
 
   @Get()

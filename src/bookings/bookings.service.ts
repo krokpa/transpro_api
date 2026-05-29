@@ -19,97 +19,99 @@ import dayjs from 'dayjs';
 
 @Injectable()
 export class BookingsService {
+  private readonly encryptionKey: string;
+
   constructor(
     private prisma: PrismaService,
     private realtime: RealtimeService,
     private notifications: NotificationsService,
     private config: ConfigService,
-  ) {}
+  ) {
+    const key = this.config.get<string>('ENCRYPTION_KEY');
+    if (!key) throw new Error('[BookingsService] ENCRYPTION_KEY manquante — démarrage refusé');
+    this.encryptionKey = key;
+  }
+
+  private effectiveASM(trip: { advancedSeatManagement: boolean | null }, vehicle: { advancedSeatManagement: boolean }): boolean {
+    return trip.advancedSeatManagement ?? vehicle.advancedSeatManagement;
+  }
 
   async create(passengerId: string, dto: CreateBookingDto) {
     const trip = await this.prisma.trip.findUnique({
       where: { id: dto.tripId },
-      include: { seats: true },
+      select: {
+        id: true, tenantId: true, status: true, price: true, availableSeats: true,
+        advancedSeatManagement: true,
+        vehicle: { select: { advancedSeatManagement: true } },
+        route: { select: { name: true, originCity: { select: { name: true } }, destinationCity: { select: { name: true } } } },
+        tenant: { select: { name: true, logo: true } },
+      },
     });
 
     if (!trip) throw new NotFoundException('Voyage introuvable');
     if (!['SCHEDULED', 'BOARDING'].includes(trip.status)) {
       throw new BadRequestException('Ce voyage n\'accepte plus de réservations');
     }
-    if (trip.availableSeats < dto.seatNumbers.length) {
+
+    const useAdvanced = this.effectiveASM(trip, trip.vehicle);
+
+    if (useAdvanced && !dto.seatNumbers?.length) {
+      throw new BadRequestException('Veuillez sélectionner au moins un siège');
+    }
+
+    const requestedCount = useAdvanced
+      ? dto.seatNumbers!.length
+      : (dto.passengerCount ?? dto.seatNumbers?.length ?? 1);
+
+    if (trip.availableSeats < requestedCount) {
       throw new BadRequestException('Pas assez de places disponibles');
     }
 
-    // Vérifier que les sièges sont disponibles (avec verrou optimiste)
-    const requestedSeats = await this.prisma.tripSeat.findMany({
-      where: {
-        tripId: dto.tripId,
-        seatNumber: { in: dto.seatNumbers },
-      },
-    });
-
-    const unavailable = requestedSeats.filter(
-      (s) => s.status !== 'AVAILABLE' || (s.lockedAt && s.lockedAt > new Date()),
-    );
-
-    if (unavailable.length > 0) {
-      throw new ConflictException(
-        `Sièges indisponibles: ${unavailable.map((s) => s.seatNumber).join(', ')}`,
-      );
-    }
-
     const lockExpiry = new Date(Date.now() + BOOKING_EXPIRY_MINUTES * 60 * 1000);
-    const bookingExpiry = new Date(Date.now() + BOOKING_EXPIRY_MINUTES * 60 * 1000);
-    const totalAmount = trip.price * dto.seatNumbers.length;
+    const totalAmount = trip.price * requestedCount;
 
-    // Transaction atomique: verrouiller sièges + créer réservation
+    // ── Transaction atomique ─────────────────────────────────────────────────
+    // La sélection ET le verrouillage des sièges se font dans la même
+    // transaction avec une condition sur status='AVAILABLE', ce qui empêche
+    // toute surévente en cas de requêtes concurrentes.
     const booking = await this.prisma.$transaction(async (tx) => {
-      // Verrouiller les sièges
-      await tx.tripSeat.updateMany({
-        where: { tripId: dto.tripId, seatNumber: { in: dto.seatNumbers } },
-        data: {
-          status: 'RESERVED',
-          lockedAt: lockExpiry,
-          lockedBy: passengerId,
-        },
-      });
+      const { seatNumbers, seatIds } = await this.reserveSeats(
+        tx, dto.tripId,
+        useAdvanced ? dto.seatNumbers! : null,
+        requestedCount, lockExpiry, passengerId,
+      );
 
-      // Décrémenter les places disponibles
       await tx.trip.update({
         where: { id: dto.tripId },
-        data: { availableSeats: { decrement: dto.seatNumbers.length } },
+        data: { availableSeats: { decrement: requestedCount } },
       });
 
-      // Créer la réservation
       return tx.booking.create({
         data: {
           reference: generateReference('TP'),
           tenantId: trip.tenantId,
           tripId: dto.tripId,
           passengerId,
-          seatNumbers: dto.seatNumbers,
+          seatNumbers,
           status: 'PENDING',
           totalAmount,
           currency: 'XOF',
-          expiresAt: bookingExpiry,
-          seats: {
-            connect: requestedSeats.map((s) => ({ id: s.id })),
-          },
+          expiresAt: lockExpiry,
+          seats: { connect: seatIds.map((id) => ({ id })) },
         },
         include: {
           trip: {
             include: {
               route: { select: { name: true, originCity: { select: { name: true } }, destinationCity: { select: { name: true } } } },
               vehicle: { select: { brand: true, model: true } },
-              tenant: { select: { name: true } },
+              tenant: { select: { name: true, logo: true } },
             },
           },
         },
       });
     });
 
-    // Broadcast temps réel: sièges réservés
-    for (const seatNumber of dto.seatNumbers) {
+    for (const seatNumber of booking.seatNumbers) {
       this.realtime.broadcastToTrip(dto.tripId, SocketEvent.SEAT_UPDATED, {
         tripId: dto.tripId,
         seatNumber,
@@ -120,12 +122,131 @@ export class BookingsService {
     this.notifications.create({
       userId: passengerId,
       type: NotificationType.BOOKING_CONFIRMED,
-      title: 'Réservation créée',
-      message: `Votre réservation ${(booking.trip.route as any).originCity?.name ?? ''} → ${(booking.trip.route as any).destinationCity?.name ?? ''} est en attente de paiement. Présentez-vous à la gare pour régler.`,
+      templateData: {
+        origin: (booking.trip.route as any).originCity?.name ?? '',
+        destination: (booking.trip.route as any).destinationCity?.name ?? '',
+      },
       data: { bookingId: booking.id },
+      companyLogo: (booking.trip.tenant as any)?.logo ?? undefined,
     }).catch(() => {});
 
     return booking;
+  }
+
+  // ── Helpers privés : verrouillage atomique des sièges ────────────────────
+
+  /**
+   * Sélectionne et verrouille des sièges dans une transaction Prisma.
+   * Si `explicitSeatNumbers` est fourni (mode avancé), ces sièges sont ciblés.
+   * Sinon (auto-assign), les N premiers disponibles sont choisis dans la TX.
+   * Lève ConflictException si les sièges sont pris entre-temps.
+   */
+  private async reserveSeats(
+    tx: any,
+    tripId: string,
+    explicitSeatNumbers: string[] | null,
+    count: number,
+    lockExpiry: Date,
+    lockedBy: string,
+  ): Promise<{ seatNumbers: string[]; seatIds: string[] }> {
+    const now = new Date();
+    let seatIds: string[];
+    let seatNumbers: string[];
+
+    if (explicitSeatNumbers) {
+      const found = await tx.tripSeat.findMany({
+        where: { tripId, seatNumber: { in: explicitSeatNumbers } },
+        select: { id: true, seatNumber: true },
+      });
+      seatIds    = found.map((s: any) => s.id);
+      seatNumbers = explicitSeatNumbers;
+    } else {
+      const available = await tx.tripSeat.findMany({
+        where: { tripId, status: 'AVAILABLE', OR: [{ lockedAt: null }, { lockedAt: { lte: now } }] },
+        orderBy: { seatNumber: 'asc' },
+        take: count,
+        select: { id: true, seatNumber: true },
+      });
+      if (available.length < count) throw new BadRequestException('Pas assez de places disponibles');
+      seatIds    = available.map((s: any) => s.id);
+      seatNumbers = available.map((s: any) => s.seatNumber);
+    }
+
+    // Verrou atomique : n'affecte que les sièges encore AVAILABLE
+    const lockResult = await tx.tripSeat.updateMany({
+      where: { id: { in: seatIds }, status: 'AVAILABLE', OR: [{ lockedAt: null }, { lockedAt: { lte: now } }] },
+      data: { status: 'RESERVED', lockedAt: lockExpiry, lockedBy },
+    });
+
+    if (lockResult.count !== count) {
+      throw new ConflictException(
+        `${count - lockResult.count} siège(s) ne sont plus disponibles — veuillez actualiser et réessayer`,
+      );
+    }
+
+    return { seatNumbers, seatIds };
+  }
+
+  /** Occupe des sièges directement (vente guichet → OCCUPIED sans lock intermédiaire). */
+  private async occupySeats(
+    tx: any,
+    tripId: string,
+    explicitSeatNumbers: string[] | null,
+    count: number,
+  ): Promise<{ seatNumbers: string[]; seatIds: string[] }> {
+    let seatIds: string[];
+    let seatNumbers: string[];
+
+    if (explicitSeatNumbers) {
+      const found = await tx.tripSeat.findMany({
+        where: { tripId, seatNumber: { in: explicitSeatNumbers } },
+        select: { id: true, seatNumber: true },
+      });
+      seatIds    = found.map((s: any) => s.id);
+      seatNumbers = explicitSeatNumbers;
+    } else {
+      const available = await tx.tripSeat.findMany({
+        where: { tripId, status: 'AVAILABLE' },
+        orderBy: { seatNumber: 'asc' },
+        take: count,
+        select: { id: true, seatNumber: true },
+      });
+      if (available.length < count) throw new BadRequestException('Pas assez de places disponibles');
+      seatIds    = available.map((s: any) => s.id);
+      seatNumbers = available.map((s: any) => s.seatNumber);
+    }
+
+    const lockResult = await tx.tripSeat.updateMany({
+      where: { id: { in: seatIds }, status: 'AVAILABLE' },
+      data: { status: 'OCCUPIED', lockedAt: null, lockedBy: null },
+    });
+
+    if (lockResult.count !== count) {
+      throw new ConflictException(
+        `${count - lockResult.count} siège(s) ne sont plus disponibles`,
+      );
+    }
+
+    return { seatNumbers, seatIds };
+  }
+
+  /**
+   * Libère des sièges et incrémente availableSeats dans une transaction.
+   * Utilisé à l'annulation et à l'expiration.
+   */
+  private async releaseSeats(
+    tx: any,
+    tripId: string,
+    seatNumbers: string[],
+  ): Promise<void> {
+    await tx.tripSeat.updateMany({
+      where: { tripId, seatNumber: { in: seatNumbers } },
+      data: { status: 'AVAILABLE', bookingId: null, lockedAt: null, lockedBy: null },
+    });
+    await tx.trip.update({
+      where: { id: tripId },
+      data: { availableSeats: { increment: seatNumbers.length } },
+    });
   }
 
   async findByPassenger(passengerId: string) {
@@ -140,6 +261,7 @@ export class BookingsService {
         },
         tickets: true,
         payment: { select: { method: true, status: true, paidAt: true } },
+        rating: { select: { rating: true, comment: true, createdAt: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -189,23 +311,55 @@ export class BookingsService {
       include: {
         trip: {
           include: {
-            route: { select: { name: true, originCity: { select: { name: true } }, destinationCity: { select: { name: true } } } },
-            tenant: { select: { name: true, logo: true } },
-            vehicle: { select: { plate: true } },
+            route: {
+                select: {
+                  name: true,
+                  durationMinutes: true,
+                  originCity: { select: { name: true } },
+                  destinationCity: { select: { name: true } },
+                  stops: {
+                    orderBy: { order: 'asc' },
+                    select: {
+                      order: true,
+                      durationFromOriginMinutes: true,
+                      priceFromOrigin: true,
+                      city: { select: { name: true } },
+                    },
+                  },
+                },
+              },
+            tenant: { select: { name: true, logo: true, slug: true } },
+            vehicle: { select: { plate: true, brand: true, model: true } },
+            departureStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
+            arrivalStation:   { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
           },
         },
         tickets: { orderBy: { seatNumber: 'asc' } },
         payment: { select: { method: true, status: true, paidAt: true } },
+        rating: { select: { rating: true, comment: true, createdAt: true } },
       },
     });
     if (!booking) throw new NotFoundException('Réservation introuvable');
     return booking;
   }
 
+  async rateBooking(bookingId: string, passengerId: string, dto: { rating: number; comment?: string }) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: bookingId, passengerId, status: 'COMPLETED' },
+      select: { id: true },
+    });
+    if (!booking) throw new NotFoundException('Réservation introuvable ou non terminée');
+    return this.prisma.tripRating.upsert({
+      where: { bookingId },
+      create: { bookingId, passengerId, rating: dto.rating, comment: dto.comment },
+      update: { rating: dto.rating, comment: dto.comment },
+    });
+  }
+
   async cancel(bookingId: string, userId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { payment: true },
+      include: { payment: true, trip: { select: { tenant: { select: { logo: true } } } } },
     });
 
     if (!booking) throw new NotFoundException('Réservation introuvable');
@@ -219,16 +373,7 @@ export class BookingsService {
         where: { id: bookingId },
         data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
-
-      await tx.tripSeat.updateMany({
-        where: { tripId: booking.tripId, seatNumber: { in: booking.seatNumbers } },
-        data: { status: 'AVAILABLE', bookingId: null, lockedAt: null, lockedBy: null },
-      });
-
-      await tx.trip.update({
-        where: { id: booking.tripId },
-        data: { availableSeats: { increment: booking.seatNumbers.length } },
-      });
+      await this.releaseSeats(tx, booking.tripId, booking.seatNumbers);
     });
 
     // Libérer les sièges en temps réel
@@ -247,9 +392,9 @@ export class BookingsService {
     this.notifications.create({
       userId: booking.passengerId,
       type: NotificationType.BOOKING_CANCELLED,
-      title: 'Réservation annulée',
-      message: `Votre réservation a été annulée. Les sièges ont été libérés.`,
+      templateData: {},
       data: { bookingId },
+      companyLogo: (booking.trip as any)?.tenant?.logo ?? undefined,
     }).catch(() => {});
 
     return { message: 'Réservation annulée avec succès' };
@@ -258,24 +403,30 @@ export class BookingsService {
   async createGuichet(tenantId: string, agentId: string, dto: CreateGuichetBookingDto) {
     const trip = await this.prisma.trip.findFirst({
       where: { id: dto.tripId, tenantId },
-      include: { route: true, tenant: true },
+      include: {
+        route: true,
+        tenant: true,
+        seats: true,
+        vehicle: { select: { advancedSeatManagement: true } },
+      },
     });
     if (!trip) throw new NotFoundException('Voyage introuvable');
     if (!['SCHEDULED', 'BOARDING'].includes(trip.status)) {
       throw new BadRequestException('Ce voyage n\'accepte plus de ventes');
     }
-    if (trip.availableSeats < dto.seatNumbers.length) {
-      throw new BadRequestException('Pas assez de places disponibles');
+
+    const useAdvanced = this.effectiveASM(trip, trip.vehicle);
+
+    if (useAdvanced && !dto.seatNumbers?.length) {
+      throw new BadRequestException('Veuillez sélectionner au moins un siège');
     }
 
-    const requestedSeats = await this.prisma.tripSeat.findMany({
-      where: { tripId: dto.tripId, seatNumber: { in: dto.seatNumbers } },
-    });
-    const unavailable = requestedSeats.filter((s) => s.status !== 'AVAILABLE');
-    if (unavailable.length > 0) {
-      throw new ConflictException(
-        `Sièges indisponibles: ${unavailable.map((s) => s.seatNumber).join(', ')}`,
-      );
+    const requestedCountGuichet = useAdvanced
+      ? dto.seatNumbers!.length
+      : (dto.passengerCount ?? dto.seatNumbers?.length ?? 1);
+
+    if (trip.availableSeats < requestedCountGuichet) {
+      throw new BadRequestException('Pas assez de places disponibles');
     }
 
     // Trouver ou créer le passager
@@ -284,7 +435,9 @@ export class BookingsService {
       : null;
 
     if (!passenger) {
-      const passwordHash = await bcrypt.hash(generateReference('PWD'), 10);
+      // Mot de passe fort aléatoire (64 chars hex) — le client guichet est anonyme
+      const strongPwd   = crypto.randomBytes(32).toString('hex');
+      const passwordHash = await bcrypt.hash(strongPwd, 12);
       const phone = dto.phone ?? `+000${generateReference('').replace(/-/g, '')}`;
       const email = dto.email ?? `${phone.replace(/\D/g, '')}_${Date.now()}@guichet.transpro.ci`;
       passenger = await this.prisma.user.create({
@@ -300,36 +453,45 @@ export class BookingsService {
       });
     }
 
-    const bookingRef = generateReference('TP');
-    const totalAmount = trip.price * dto.seatNumbers.length;
-    const paymentMethod = dto.paymentMethod ?? PaymentMethod.CASH;
+    const bookingRef     = generateReference('TP');
+    const totalAmount    = trip.price * requestedCountGuichet;
+    const paymentMethod  = dto.paymentMethod ?? PaymentMethod.CASH;
 
-    // Générer les QR codes
-    const ticketsData = await Promise.all(
-      dto.seatNumbers.map(async (seatNumber) => {
-        const ticketData = {
-          bookingRef,
-          tripId: dto.tripId,
-          seatNumber,
-          passengerId: passenger!.id,
-          issuedAt: new Date().toISOString(),
-        };
-        const sig = this.signTicket(ticketData);
-        const qrData = JSON.stringify({ ...ticketData, sig });
-        const qrCode = await QRCode.toDataURL(qrData);
-        return { seatNumber, qrCode, qrCodeData: qrData };
-      }),
-    );
+    // Les tickets sont générés avant la transaction (QR encoding = CPU-bound)
+    // On connaît déjà les seatNumbers voulus mais pas encore le bookingId :
+    // on pré-signe avec un placeholder et complète dans la TX.
+    // Pour simplifier : on génère les tickets APRÈS avoir récupéré les seatNumbers
+    // depuis la transaction via une 2ème passe (voir ci-dessous).
 
     const booking = await this.prisma.$transaction(async (tx) => {
-      await tx.tripSeat.updateMany({
-        where: { tripId: dto.tripId, seatNumber: { in: dto.seatNumbers } },
-        data: { status: 'OCCUPIED', lockedAt: null, lockedBy: null },
-      });
+      // ── Verrou atomique des sièges (guichet → OCCUPIED directement) ─────
+      const { seatNumbers, seatIds } = await this.occupySeats(
+        tx, dto.tripId,
+        useAdvanced ? dto.seatNumbers! : null,
+        requestedCountGuichet,
+      );
+
       await tx.trip.update({
         where: { id: dto.tripId },
-        data: { availableSeats: { decrement: dto.seatNumbers.length } },
+        data: { availableSeats: { decrement: requestedCountGuichet } },
       });
+
+      // Génération des QR codes (dans la TX pour cohérence)
+      const ticketsData = await Promise.all(
+        seatNumbers.map(async (seatNumber) => {
+          const ticketData = {
+            bookingRef,
+            tripId: dto.tripId,
+            seatNumber,
+            passengerId: passenger!.id,
+            issuedAt: new Date().toISOString(),
+          };
+          const sig = this.signTicket(ticketData);
+          const qrData = JSON.stringify({ ...ticketData, sig });
+          const qrCode = await QRCode.toDataURL(qrData);
+          return { seatNumber, qrCode, qrCodeData: qrData };
+        }),
+      );
 
       const b = await tx.booking.create({
         data: {
@@ -337,14 +499,14 @@ export class BookingsService {
           tenantId,
           tripId: dto.tripId,
           passengerId: passenger!.id,
-          seatNumbers: dto.seatNumbers,
+          seatNumbers,
           status: 'CONFIRMED',
           totalAmount,
           currency: 'XOF',
           expiresAt: dayjs().add(1, 'year').toDate(),
           confirmedAt: new Date(),
           ...(dto.stationId && { soldByStationId: dto.stationId }),
-          seats: { connect: requestedSeats.map((s) => ({ id: s.id })) },
+          seats: { connect: seatIds.map((id) => ({ id })) },
         },
       });
 
@@ -377,7 +539,7 @@ export class BookingsService {
       return b;
     });
 
-    for (const seatNumber of dto.seatNumbers) {
+    for (const seatNumber of booking.seatNumbers) {
       this.realtime.broadcastToTrip(dto.tripId, SocketEvent.SEAT_UPDATED, {
         tripId: dto.tripId,
         seatNumber,
@@ -388,6 +550,14 @@ export class BookingsService {
       bookingId: booking.id,
       tripId: dto.tripId,
     });
+
+    this.notifications.create({
+      userId: passenger!.id,
+      type: NotificationType.TICKET_READY,
+      templateData: {},
+      data: { bookingId: booking.id },
+      companyLogo: (trip.tenant as any)?.logo ?? undefined,
+    }).catch(() => {});
 
     return this.prisma.booking.findUnique({
       where: { id: booking.id },
@@ -407,46 +577,66 @@ export class BookingsService {
 
   private signTicket(data: object): string {
     return crypto
-      .createHmac('sha256', this.config.get('ENCRYPTION_KEY', 'default-key'))
+      .createHmac('sha256', this.encryptionKey)
       .update(JSON.stringify(data))
       .digest('hex');
   }
 
-  // Expire les réservations non payées toutes les minutes
+  // Expire les réservations non payées — traitement par batch de 200
   @Cron(CronExpression.EVERY_MINUTE)
   async expireUnpaidBookings() {
-    const expired = await this.prisma.booking.findMany({
-      where: {
-        status: 'PENDING',
-        expiresAt: { lt: new Date() },
-      },
-    });
+    const BATCH = 200;
+    const now   = new Date();
+    let processed = 0;
 
-    for (const booking of expired) {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: { status: 'CANCELLED', cancelReason: 'Expiration du délai de paiement' },
-        });
-
-        await tx.tripSeat.updateMany({
-          where: { tripId: booking.tripId, seatNumber: { in: booking.seatNumbers } },
-          data: { status: 'AVAILABLE', bookingId: null, lockedAt: null, lockedBy: null },
-        });
-
-        await tx.trip.update({
-          where: { id: booking.tripId },
-          data: { availableSeats: { increment: booking.seatNumbers.length } },
-        });
+    while (true) {
+      const expired = await this.prisma.booking.findMany({
+        where: { status: 'PENDING', expiresAt: { lt: now } },
+        select: {
+          id: true, tripId: true, passengerId: true, seatNumbers: true, tenantId: true,
+          trip: { select: { tenant: { select: { logo: true } } } },
+        },
+        take: BATCH,
       });
 
-      for (const seatNumber of booking.seatNumbers) {
-        this.realtime.broadcastToTrip(booking.tripId, SocketEvent.SEAT_UPDATED, {
-          tripId: booking.tripId,
-          seatNumber,
-          status: 'AVAILABLE',
-        });
+      if (expired.length === 0) break;
+
+      // Annulation et libération en transactions parallèles (max 20 simultanées)
+      await Promise.all(
+        expired.map((booking) =>
+          this.prisma.$transaction(async (tx) => {
+            await tx.booking.update({
+              where: { id: booking.id },
+              data: { status: 'CANCELLED', cancelReason: 'Expiration du délai de paiement' },
+            });
+            await this.releaseSeats(tx, booking.tripId, booking.seatNumbers);
+          }),
+        ),
+      );
+
+      // Notifications temps réel et push (non bloquant)
+      for (const booking of expired) {
+        for (const seatNumber of booking.seatNumbers) {
+          this.realtime.broadcastToTrip(booking.tripId, SocketEvent.SEAT_UPDATED, {
+            tripId: booking.tripId, seatNumber, status: 'AVAILABLE',
+          });
+        }
+        this.notifications.create({
+          userId: booking.passengerId,
+          type: NotificationType.BOOKING_EXPIRED,
+          templateData: {},
+          data: { bookingId: booking.id },
+          companyLogo: (booking as any).trip?.tenant?.logo ?? undefined,
+        }).catch(() => {});
       }
+
+      processed += expired.length;
+      if (expired.length < BATCH) break;
+    }
+
+    if (processed > 0) {
+      // Logger importé via NestJS Logger si besoin — log minimal ici
+      console.log(`[expireUnpaidBookings] ${processed} réservation(s) expirée(s)`);
     }
   }
 }

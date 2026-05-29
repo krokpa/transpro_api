@@ -372,8 +372,8 @@ export class ReportsService {
   async tripReport(tenantId: string, tripId: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
     const [tenant, trip] = await Promise.all([
       this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true } }),
-      this.prisma.trip.findUnique({
-        where: { id: tripId },
+      this.prisma.trip.findFirst({
+        where: { id: tripId, tenantId },   // isolation tenant dans la requête
         include: {
           route: true,
           vehicle: true,
@@ -389,7 +389,7 @@ export class ReportsService {
       }),
     ]);
 
-    if (!trip || trip.tenantId !== tenantId) throw new NotFoundException('Voyage introuvable');
+    if (!trip) throw new NotFoundException('Voyage introuvable');
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
 
@@ -667,8 +667,8 @@ export class ReportsService {
   async stationTripReport(stationId: string, tenantId: string, tripId: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
     const [station, trip] = await Promise.all([
       this.prisma.station.findFirst({ where: { id: stationId, tenantId }, select: { name: true, code: true } }),
-      this.prisma.trip.findUnique({
-        where: { id: tripId },
+      this.prisma.trip.findFirst({
+        where: { id: tripId, tenantId },   // isolation tenant dans la requête
         include: {
           route: true,
           vehicle: true,
@@ -685,7 +685,7 @@ export class ReportsService {
     ]);
 
     if (!station) throw new NotFoundException('Gare introuvable');
-    if (!trip || trip.tenantId !== tenantId) throw new NotFoundException('Voyage introuvable');
+    if (!trip) throw new NotFoundException('Voyage introuvable');
 
     const stationLabel = station.code ? `${station.name} (${station.code})` : station.name;
 

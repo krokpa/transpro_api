@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -25,6 +26,13 @@ import { UserRole } from '@transpro/shared';
 @ApiBearerAuth()
 export class UsersController {
   constructor(private usersService: UsersService) {}
+
+  @Get('lookup')
+  @ApiOperation({ summary: 'Rechercher un passager inscrit par numéro de téléphone' })
+  lookupByPhone(@Query('phone') phone: string) {
+    if (!phone) return null;
+    return this.usersService.lookupByPhone(phone);
+  }
 
   @Get('team')
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
@@ -71,11 +79,32 @@ export class UsersController {
     return this.usersService.update(userId, dto);
   }
 
+  @Patch('avatar')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mettre à jour sa photo de profil (base64 data URL)' })
+  updateAvatar(@CurrentUser('id') userId: string, @Body('avatar') avatar: string) {
+    return this.usersService.updateAvatar(userId, avatar);
+  }
+
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Changer son mot de passe' })
   changePassword(@CurrentUser('id') userId: string, @Body() dto: ChangePasswordDto) {
     return this.usersService.changePassword(userId, dto.currentPassword, dto.newPassword);
+  }
+
+  @Post('device-token')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Enregistrer un token FCM (push notifications)' })
+  registerDeviceToken(@CurrentUser('id') userId: string, @Body('token') token: string) {
+    return this.usersService.registerDeviceToken(userId, token);
+  }
+
+  @Delete('device-token')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer un token FCM' })
+  unregisterDeviceToken(@CurrentUser('id') userId: string, @Body('token') token: string) {
+    return this.usersService.unregisterDeviceToken(userId, token);
   }
 
   @Post('add-to-tenant')

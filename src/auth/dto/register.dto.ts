@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional, IsEnum } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional, IsEnum, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole } from '@transpro/shared';
 
@@ -20,6 +20,7 @@ export class RegisterDto {
   @ApiProperty({ example: '+2250712345678' })
   @IsString()
   @IsNotEmpty()
+  @Matches(/^\+?[\d\s\-().]{7,20}$/, { message: 'Format de téléphone invalide' })
   phone: string;
 
   @ApiProperty({ minLength: 8 })

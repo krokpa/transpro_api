@@ -24,9 +24,16 @@ import { StationsModule } from './stations/stations.module';
 import { CitiesModule } from './cities/cities.module';
 import { EmailModule } from './email/email.module';
 import { BillingModule } from './billing/billing.module';
+import { ParcelsModule } from './parcels/parcels.module';
+import { SmsModule } from './sms/sms.module';
+import { LuggageModule } from './luggage/luggage.module';
+import { RefundsModule } from './refunds/refunds.module';
+import { PushModule } from './push/push.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
+import { PaymentRedirectController } from './payment-redirect.controller';
 
 @Module({
+  controllers: [PaymentRedirectController],
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
@@ -65,6 +72,11 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
     CitiesModule,
     EmailModule,
     BillingModule,
+    ParcelsModule,
+    SmsModule,
+    LuggageModule,
+    RefundsModule,
+    PushModule,
   ],
 })
 export class AppModule implements NestModule {

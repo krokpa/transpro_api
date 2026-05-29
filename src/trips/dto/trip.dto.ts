@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -61,6 +62,11 @@ export class CreateTripDto {
   @IsOptional()
   @IsString()
   arrivalStationId?: string;
+
+  @ApiPropertyOptional({ description: 'null = hérite du véhicule, true/false = override' })
+  @IsOptional()
+  @IsBoolean()
+  advancedSeatManagement?: boolean;
 }
 
 export class UpdateTripStatusDto {
@@ -105,4 +111,14 @@ export class SearchTripsDto {
   @IsOptional()
   @IsEnum(TripClass)
   tripClass?: TripClass;
+
+  @ApiPropertyOptional({ example: 'express-voyage', description: 'Filtrer par slug de compagnie' })
+  @IsOptional()
+  @IsString()
+  tenantSlug?: string;
+
+  @ApiPropertyOptional({ description: 'Filtrer par ID de gare de départ' })
+  @IsOptional()
+  @IsString()
+  departureStationId?: string;
 }

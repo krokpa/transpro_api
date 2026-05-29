@@ -1,4 +1,4 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, ArrayMinSize, ArrayMaxSize } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, ArrayMaxSize, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod } from '@transpro/shared';
 
@@ -8,12 +8,18 @@ export class CreateBookingDto {
   @IsNotEmpty()
   tripId: string;
 
-  @ApiProperty({ example: ['1A', '1B'] })
+  @ApiPropertyOptional({ example: ['1A', '1B'], description: 'Requis si gestion avancée des sièges activée' })
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ArrayMaxSize(6)
   @IsString({ each: true })
-  seatNumbers: string[];
+  seatNumbers?: string[];
+
+  @ApiPropertyOptional({ example: 2, description: 'Nombre de sièges si gestion avancée désactivée' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  passengerCount?: number;
 }
 
 export class CreateGuichetBookingDto {
@@ -22,12 +28,18 @@ export class CreateGuichetBookingDto {
   @IsNotEmpty()
   tripId: string;
 
-  @ApiProperty({ example: ['1A', '1B'] })
+  @ApiPropertyOptional({ example: ['1A', '1B'], description: 'Requis si gestion avancée des sièges activée' })
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ArrayMaxSize(6)
   @IsString({ each: true })
-  seatNumbers: string[];
+  seatNumbers?: string[];
+
+  @ApiPropertyOptional({ example: 2, description: 'Nombre de sièges si gestion avancée désactivée' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  passengerCount?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

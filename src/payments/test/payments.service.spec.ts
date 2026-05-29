@@ -6,7 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { createMockPrisma } from '../../common/test/mock-prisma';
-import { COMMISSION_RATE } from '@transpro/shared';
+import { COMMISSION_RATE, NotificationType } from '@transpro/shared';
 
 jest.mock('@transpro/shared', () => ({
   ...jest.requireActual('@transpro/shared'),
@@ -20,9 +20,11 @@ jest.mock('qrcode', () => ({
 
 jest.mock('axios');
 
-const mockPrisma = createMockPrisma();
-const mockRealtime = { broadcastToTrip: jest.fn(), broadcastToCompany: jest.fn(), sendToUser: jest.fn() };
+const mockPrisma        = createMockPrisma();
+const mockRealtime      = { broadcastToTrip: jest.fn(), broadcastToCompany: jest.fn(), sendToUser: jest.fn() };
 const mockNotifications = { create: jest.fn().mockResolvedValue({}) };
+
+const LOGO_URL = 'https://example.com/logo.png';
 
 const mockBooking = {
   id: 'booking-1',
@@ -39,7 +41,7 @@ const mockBooking = {
     id: 'trip-1',
     tenantId: 'tenant-1',
     route: { originCity: { name: 'Abidjan' }, destinationCity: { name: 'Bouaké' } },
-    tenant: { name: 'Transport Express CI' },
+    tenant: { name: 'Transport Express CI', logo: LOGO_URL },
   },
   passenger: {
     id: 'user-1',
@@ -57,8 +59,8 @@ describe('PaymentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: RealtimeService, useValue: mockRealtime },
+        { provide: PrismaService,       useValue: mockPrisma        },
+        { provide: RealtimeService,     useValue: mockRealtime      },
         { provide: NotificationsService, useValue: mockNotifications },
         {
           provide: ConfigService,
@@ -81,6 +83,8 @@ describe('PaymentsService', () => {
     jest.clearAllMocks();
   });
 
+  // ── commission calculation ────────────────────────────────────────────────────
+
   describe('commission calculation', () => {
     it('should calculate 4% commission correctly', () => {
       const amount = 12000;
@@ -98,6 +102,8 @@ describe('PaymentsService', () => {
       expect(amount - commission).toBe(5280);
     });
   });
+
+  // ── initiate ──────────────────────────────────────────────────────────────────
 
   describe('initiate', () => {
     it('should create a payment record with correct amounts', async () => {
@@ -149,6 +155,7 @@ describe('PaymentsService', () => {
         ...mockBooking,
         expiresAt: new Date(Date.now() - 1000),
       });
+      mockPrisma.booking.update.mockResolvedValue({});  // annulation silencieuse
 
       await expect(service.initiate('booking-1', 'user-1')).rejects.toThrow(BadRequestException);
     });
@@ -162,6 +169,106 @@ describe('PaymentsService', () => {
       await expect(service.initiate('booking-1', 'user-1')).rejects.toThrow(BadRequestException);
     });
   });
+
+  // ── confirmPayment ────────────────────────────────────────────────────────────
+
+  describe('confirmPayment', () => {
+    it('should send PAYMENT_SUCCESS notification with templateData and logo', async () => {
+      mockPrisma.booking.findUnique.mockResolvedValue({
+        ...mockBooking,
+        status: 'PENDING',
+        trip: { ...mockBooking.trip, tenant: { logo: LOGO_URL } },
+      });
+      mockPrisma.$transaction.mockResolvedValue(undefined);
+
+      await service.confirmPayment('booking-1', 'payment-1');
+
+      expect(mockNotifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: NotificationType.PAYMENT_SUCCESS,
+          templateData: { origin: 'Abidjan', destination: 'Bouaké' },
+          companyLogo: LOGO_URL,
+        }),
+      );
+    });
+
+    it('should not throw when booking is not found', async () => {
+      mockPrisma.booking.findUnique.mockResolvedValue(null);
+
+      await expect(service.confirmPayment('nonexistent', 'pay-1')).resolves.not.toThrow();
+      expect(mockNotifications.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── handleGeniusPayWebhook ────────────────────────────────────────────────────
+
+  describe('handleGeniusPayWebhook', () => {
+    it('should confirm payment on success event', async () => {
+      mockPrisma.payment.findUnique.mockResolvedValue({
+        id: 'payment-1',
+        bookingId: 'booking-1',
+        status: 'PROCESSING',
+      });
+
+      const confirmSpy = jest.spyOn(service, 'confirmPayment').mockResolvedValue(undefined);
+
+      await service.handleGeniusPayWebhook(
+        JSON.stringify({ event: 'payment.success', data: { metadata: { transactionId: 'PAY-MOCK-REF' } } }),
+        '',
+        '',
+      );
+
+      // Webhook extracts paymentChannel (undefined when not in response) and passes the raw transaction
+      expect(confirmSpy).toHaveBeenCalledWith(
+        'booking-1',
+        'payment-1',
+        undefined,
+        expect.objectContaining({ metadata: { transactionId: 'PAY-MOCK-REF' } }),
+      );
+    });
+
+    it('should mark payment failed and send PAYMENT_FAILED notification on failure event', async () => {
+      mockPrisma.payment.findUnique.mockResolvedValue({
+        id: 'payment-1',
+        bookingId: 'booking-1',
+        status: 'PROCESSING',
+        booking: {
+          ...mockBooking,
+          trip: { tenant: { logo: LOGO_URL } },
+        },
+      });
+      mockPrisma.$transaction = jest.fn().mockResolvedValue(undefined);
+
+      await service.handleGeniusPayWebhook(
+        JSON.stringify({ event: 'payment.failed', data: { metadata: { transactionId: 'PAY-MOCK-REF' } } }),
+        '',
+        '',
+      );
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockNotifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: NotificationType.PAYMENT_FAILED,
+          templateData: {},
+          companyLogo: LOGO_URL,
+        }),
+      );
+    });
+
+    it('should silently ignore unknown transaction ids', async () => {
+      mockPrisma.payment.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.handleGeniusPayWebhook(
+          JSON.stringify({ event: 'payment.success', data: { metadata: { transactionId: 'UNKNOWN' } } }),
+          '',
+          '',
+        ),
+      ).resolves.not.toThrow();
+    });
+  });
+
+  // ── scanTicket ────────────────────────────────────────────────────────────────
 
   describe('scanTicket', () => {
     it('should reject invalid JSON in QR data', async () => {
@@ -193,7 +300,6 @@ describe('PaymentsService', () => {
         sig: 'valid-sig',
       });
 
-      // Simulate the service's signature check passing by making ticket found
       mockPrisma.ticket.findFirst.mockResolvedValue({
         id: 'ticket-1',
         qrCodeData: qrData,
@@ -201,61 +307,9 @@ describe('PaymentsService', () => {
         booking: { status: 'CONFIRMED', trip: { route: {} } },
       });
 
-      // We need to bypass the signature check for this test
-      // In practice, sign with the real ENCRYPTION_KEY
       jest.spyOn(service as any, 'signTicket').mockReturnValue('valid-sig');
 
       await expect(service.scanTicket(qrData, 'agent-1')).rejects.toThrow(BadRequestException);
-    });
-  });
-
-  describe('handleGeniusPayWebhook', () => {
-    it('should confirm payment on success event', async () => {
-      mockPrisma.payment.findUnique.mockResolvedValue({
-        id: 'payment-1',
-        bookingId: 'booking-1',
-        status: 'PROCESSING',
-      });
-
-      const confirmSpy = jest.spyOn(service, 'confirmPayment').mockResolvedValue(undefined);
-
-      await service.handleGeniusPayWebhook(
-        JSON.stringify({ event: 'payment.success', data: { metadata: { transactionId: 'PAY-MOCK-REF' } } }),
-        '',
-        '',
-      );
-
-      expect(confirmSpy).toHaveBeenCalledWith('booking-1', 'payment-1');
-    });
-
-    it('should mark payment failed on failure event', async () => {
-      mockPrisma.payment.findUnique.mockResolvedValue({
-        id: 'payment-1',
-        bookingId: 'booking-1',
-        status: 'PROCESSING',
-        booking: { ...mockBooking },
-      });
-      mockPrisma.$transaction = jest.fn().mockResolvedValue(undefined);
-
-      await service.handleGeniusPayWebhook(
-        JSON.stringify({ event: 'payment.failed', data: { metadata: { transactionId: 'PAY-MOCK-REF' } } }),
-        '',
-        '',
-      );
-
-      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
-    });
-
-    it('should silently ignore unknown transaction ids', async () => {
-      mockPrisma.payment.findUnique.mockResolvedValue(null);
-
-      await expect(
-        service.handleGeniusPayWebhook(
-          JSON.stringify({ event: 'payment.success', data: { metadata: { transactionId: 'UNKNOWN' } } }),
-          '',
-          '',
-        ),
-      ).resolves.not.toThrow();
     });
   });
 });

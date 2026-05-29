@@ -3,11 +3,13 @@ import {
   NotFoundException,
   BadRequestException,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PushService } from '../push/push.service';
 import { SocketEvent, COMMISSION_RATE, NotificationType, PaymentMethod } from '@transpro/shared';
 import { generateReference } from '@transpro/shared';
 import axios from 'axios';
@@ -18,18 +20,26 @@ const GENIUSPAY_BASE = 'https://pay.genius.ci/api/v1/merchant';
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+  private readonly encryptionKey: string;
+
   constructor(
     private prisma: PrismaService,
     private realtime: RealtimeService,
     private notifications: NotificationsService,
     private config: ConfigService,
-  ) {}
+    private push: PushService,
+  ) {
+    const key = this.config.get<string>('ENCRYPTION_KEY');
+    if (!key) throw new Error('[PaymentsService] ENCRYPTION_KEY manquante — démarrage refusé');
+    this.encryptionKey = key;
+  }
 
   async initiate(bookingId: string, passengerId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        trip: { include: { route: true, tenant: true } },
+        trip: { include: { route: { include: { originCity: true, destinationCity: true } }, tenant: true } },
         passenger: true,
         payment: true,
       },
@@ -37,15 +47,77 @@ export class PaymentsService {
 
     if (!booking) throw new NotFoundException('Réservation introuvable');
     if (booking.passengerId !== passengerId) throw new BadRequestException('Accès refusé');
+    // Vérifie le statut AVANT expiresAt : le cron peut avoir déjà annulé la réservation
     if (booking.status !== 'PENDING') throw new BadRequestException('Réservation déjà traitée');
-    if (booking.payment) throw new BadRequestException('Paiement déjà initié');
-    if (booking.expiresAt < new Date()) throw new BadRequestException('Réservation expirée');
+    if (booking.expiresAt && booking.expiresAt < new Date()) {
+      // Double-sécurité : annuler si le cron n'a pas encore tourné
+      // Annulation silencieuse (le cron peut déjà l'avoir fait)
+      try {
+        await this.prisma.booking.update({
+          where: { id: bookingId, status: 'PENDING' },
+          data: { status: 'CANCELLED', cancelReason: 'Expiration (initiate check)' },
+        });
+      } catch (_) {}
+      throw new BadRequestException('Réservation expirée — veuillez en créer une nouvelle');
+    }
+
+    // Gestion des tentatives multiples
+    if (booking.payment) {
+      const p = booking.payment;
+      // Paiement PROCESSING déjà initié avec un lien valide → retourner le lien existant
+      if (p.status === 'PROCESSING' && p.providerRef) {
+        const existing = p.providerData as any;
+        if (existing?.checkout_url) {
+          this.logger.log(`Returning existing checkout URL for booking ${bookingId}`);
+          return { checkoutUrl: existing.checkout_url, reference: p.providerRef };
+        }
+      }
+      // Paiement FAILED → on supprime et on réessaie
+      if (p.status === 'FAILED') {
+        await this.prisma.payment.delete({ where: { id: p.id } });
+      } else {
+        throw new BadRequestException('Paiement déjà initié');
+      }
+    }
 
     const commissionAmount = Math.round(booking.totalAmount * COMMISSION_RATE);
     const netAmount = booking.totalAmount - commissionAmount;
     const transactionId = generateReference('PAY');
+    const appUrl = this.config.get('FRONTEND_URL') || this.config.get('APP_URL') || 'http://localhost:3000';
 
-    const payment = await this.prisma.payment.create({
+    const origin = (booking.trip.route as any).originCity?.name ?? '';
+    const dest   = (booking.trip.route as any).destinationCity?.name ?? '';
+
+    this.logger.log(`Initiating GeniusPay for booking ${bookingId}, amount ${booking.totalAmount} XOF`);
+
+    let geniusRes: any;
+    try {
+      geniusRes = await this.initiateGeniusPay({
+        amount: booking.totalAmount,
+        description: `Billet ${origin} → ${dest}`,
+        customer: {
+          name: `${booking.passenger.firstName} ${booking.passenger.lastName}`,
+          email: booking.passenger.email,
+          phone: booking.passenger.phone ?? '',
+        },
+        successUrl: `${appUrl}/passenger/payment/success?bookingId=${bookingId}`,
+        errorUrl: `${appUrl}/passenger/payment/error?bookingId=${bookingId}`,
+        metadata: { transactionId, bookingId },
+      });
+    } catch (err) {
+      this.logger.error(`GeniusPay initiation failed for booking ${bookingId}`, err);
+      throw err;
+    }
+
+    this.logger.log(`GeniusPay response for booking ${bookingId}: ${JSON.stringify(geniusRes)}`);
+
+    if (!geniusRes?.checkout_url) {
+      this.logger.error(`GeniusPay returned no checkout_url. Full response: ${JSON.stringify(geniusRes)}`);
+      throw new BadRequestException('Lien de paiement non reçu du prestataire');
+    }
+
+    // Créer l'enregistrement Payment seulement après confirmation de GeniusPay
+    await this.prisma.payment.create({
       data: {
         bookingId,
         tenantId: booking.tenantId,
@@ -56,26 +128,9 @@ export class PaymentsService {
         transactionId,
         commissionAmount,
         netAmount,
+        providerRef: geniusRes.reference,
+        providerData: geniusRes as any,
       },
-    });
-
-    const appUrl = this.config.get('APP_URL', 'http://localhost:3000');
-    const geniusRes = await this.initiateGeniusPay({
-      amount: booking.totalAmount,
-      description: `Billet ${(booking.trip.route as any).originCity?.name ?? ''} → ${(booking.trip.route as any).destinationCity?.name ?? ''}`,
-      customer: {
-        name: `${booking.passenger.firstName} ${booking.passenger.lastName}`,
-        email: booking.passenger.email,
-        phone: booking.passenger.phone,
-      },
-      successUrl: `${appUrl}/passenger/payment/success?bookingId=${bookingId}`,
-      errorUrl: `${appUrl}/passenger/payment/error?bookingId=${bookingId}`,
-      metadata: { transactionId, bookingId },
-    });
-
-    await this.prisma.payment.update({
-      where: { id: payment.id },
-      data: { providerRef: geniusRes.reference, providerData: geniusRes as any },
     });
 
     return { checkoutUrl: geniusRes.checkout_url, reference: geniusRes.reference };
@@ -98,7 +153,12 @@ export class PaymentsService {
     }
 
     let body: any;
-    try { body = JSON.parse(rawBody); } catch { return { received: true }; }
+    try {
+      body = JSON.parse(rawBody);
+    } catch (err: any) {
+      this.logger.error(`[Webhook] Payload JSON invalide: ${err.message}`, rawBody.slice(0, 200));
+      throw new BadRequestException('Webhook payload invalide — retry attendu');
+    }
 
     const event: string = body.event;
     const transaction = body.data;
@@ -110,7 +170,8 @@ export class PaymentsService {
       const payment = await this.prisma.payment.findUnique({ where: { transactionId } });
       if (!payment || payment.status === 'SUCCESS') return { received: true };
 
-      await this.confirmPayment(payment.bookingId, payment.id);
+      const paymentChannel = this._extractChannel(transaction);
+      await this.confirmPayment(payment.bookingId, payment.id, paymentChannel, transaction);
     }
 
     if (event === 'payment.failed' || event === 'payment.expired' || event === 'payment.cancelled') {
@@ -119,7 +180,7 @@ export class PaymentsService {
 
       const payment = await this.prisma.payment.findUnique({
         where: { transactionId },
-        include: { booking: true },
+        include: { booking: { include: { trip: { select: { tenant: { select: { logo: true } } } } } } },
       });
       if (!payment || payment.status !== 'PROCESSING') return { received: true };
 
@@ -145,22 +206,23 @@ export class PaymentsService {
       this.notifications.create({
         userId: payment.booking.passengerId,
         type: NotificationType.PAYMENT_FAILED,
-        title: 'Paiement échoué',
-        message: 'Votre paiement n\'a pas abouti. Les sièges ont été libérés.',
+        templateData: {},
         data: { bookingId: payment.bookingId },
+        companyLogo: (payment.booking as any)?.trip?.tenant?.logo ?? undefined,
       }).catch(() => {});
     }
 
     return { received: true };
   }
 
-  async confirmPayment(bookingId: string, paymentId: string) {
+  async confirmPayment(bookingId: string, paymentId: string, paymentChannel?: string, webhookData?: any) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { trip: { include: { route: true } }, passenger: true },
+      include: { trip: { include: { route: true, tenant: { select: { logo: true } } } }, passenger: true },
     });
     if (!booking) return;
 
+    // Pré-génération des QR codes (CPU-bound, hors transaction)
     const tickets = await Promise.all(
       booking.seatNumbers.map(async (seatNumber) => {
         const ticketData = {
@@ -177,14 +239,30 @@ export class PaymentsService {
       }),
     );
 
+    const paidAt = new Date();
+    let alreadyConfirmed = false;
+
     await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: paymentId },
-        data: { status: 'SUCCESS', paidAt: new Date() },
+      // Garde atomique : n'agit que si le paiement est encore PROCESSING.
+      // Protège contre les doubles appels webhook (idempotence).
+      const updated = await tx.payment.updateMany({
+        where: { id: paymentId, status: 'PROCESSING' },
+        data: {
+          status: 'SUCCESS',
+          paidAt,
+          ...(paymentChannel && { paymentChannel }),
+          ...(webhookData && { providerData: webhookData }),
+        },
       });
+
+      if (updated.count === 0) {
+        alreadyConfirmed = true;
+        return; // Déjà confirmé — sortie sans erreur
+      }
+
       await tx.booking.update({
         where: { id: bookingId },
-        data: { status: 'CONFIRMED', confirmedAt: new Date() },
+        data: { status: 'CONFIRMED', confirmedAt: paidAt },
       });
       await tx.tripSeat.updateMany({
         where: { tripId: booking.tripId, seatNumber: { in: booking.seatNumbers } },
@@ -200,18 +278,33 @@ export class PaymentsService {
       });
     });
 
+    if (alreadyConfirmed) {
+      this.logger.log(`confirmPayment: booking ${bookingId} already confirmed — skipping`);
+      return;
+    }
+
     this.notifications.create({
       userId: booking.passengerId,
       type: NotificationType.PAYMENT_SUCCESS,
-      title: 'Paiement confirmé !',
-      message: `Votre billet ${(booking.trip.route as any).originCity?.name ?? ''} → ${(booking.trip.route as any).destinationCity?.name ?? ''} est prêt.`,
+      templateData: {
+        origin: (booking.trip.route as any).originCity?.name ?? '',
+        destination: (booking.trip.route as any).destinationCity?.name ?? '',
+      },
       data: { bookingId, reference: booking.reference },
+      companyLogo: (booking.trip as any)?.tenant?.logo ?? undefined,
     }).catch(() => {});
 
     this.realtime.broadcastToCompany(booking.tenantId, SocketEvent.BOOKING_CREATED, {
       bookingId,
       tripId: booking.tripId,
     });
+
+    // Web push dashboard : alerter le staff d'une nouvelle réservation confirmée
+    this.push.sendWebPushToTenant(booking.tenantId, {
+      title: 'Nouvelle réservation',
+      message: `Réservation ${booking.reference} confirmée — siège(s) ${booking.seatNumbers.join(', ')}`,
+      data: { type: 'BOOKING_CONFIRMED', bookingId, tripId: booking.tripId },
+    }).catch(() => {});
 
     for (const seatNumber of booking.seatNumbers) {
       this.realtime.broadcastToTrip(booking.tripId, SocketEvent.SEAT_UPDATED, {
@@ -220,6 +313,28 @@ export class PaymentsService {
         status: 'OCCUPIED',
       });
     }
+  }
+
+  async confirmFromRedirect(bookingId: string, passengerId: string) {
+    const payment = await this.prisma.payment.findFirst({
+      where: { bookingId },
+      include: { booking: { select: { passengerId: true } } },
+    });
+
+    if (!payment) throw new NotFoundException('Aucun paiement trouvé pour cette réservation');
+    if (payment.booking.passengerId !== passengerId) throw new BadRequestException('Accès refusé');
+
+    if (payment.status === 'SUCCESS') {
+      return { status: 'SUCCESS', updated: false };
+    }
+
+    if (payment.status !== 'PROCESSING') {
+      return { status: payment.status, updated: false };
+    }
+
+    this.logger.log(`Confirming payment ${payment.id} from GeniusPay redirect for booking ${bookingId}`);
+    await this.confirmPayment(bookingId, payment.id);
+    return { status: 'SUCCESS', updated: true };
   }
 
   async checkStatus(paymentId: string, passengerId: string) {
@@ -251,6 +366,7 @@ export class PaymentsService {
     }
 
     let gpStatus: string;
+    let gpData: any;
     try {
       const res = await axios.get(`${GENIUSPAY_BASE}/payments/${payment.providerRef}`, {
         headers: {
@@ -258,14 +374,18 @@ export class PaymentsService {
           'X-API-Secret': this.config.get('GENIUSPAY_API_SECRET'),
         },
       });
-      // Genius Pay response: { success: true, data: { status: "pending|processing|completed|failed|expired", ... } }
-      gpStatus = (res.data?.data?.status ?? '').toLowerCase();
-    } catch {
+      // Genius Pay response: { success: true, data: { status: "pending|processing|completed|failed|expired", payment_method: "wave|orange_money|...", ... } }
+      gpData   = res.data?.data;
+      gpStatus = (gpData?.status ?? '').toLowerCase();
+      this.logger.log(`GeniusPay status check for ${payment.providerRef}: "${gpStatus}" (raw: ${JSON.stringify(gpData)})`);
+    } catch (err: any) {
+      this.logger.warn(`GeniusPay status check failed: ${err?.message}`);
       return { status: payment.status, updated: false };
     }
 
-    if (gpStatus === 'completed') {
-      await this.confirmPayment(payment.bookingId, payment.id);
+    if (gpStatus === 'completed' || gpStatus === 'success' || gpStatus === 'paid') {
+      const paymentChannel = this._extractChannel(gpData);
+      await this.confirmPayment(payment.bookingId, payment.id, paymentChannel, gpData);
       return { status: 'SUCCESS', updated: true };
     }
 
@@ -318,6 +438,16 @@ export class PaymentsService {
     });
   }
 
+  async checkInTicket(ticketId: string, agentId: string) {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Billet introuvable');
+    if (ticket.isScanned) throw new BadRequestException('Billet déjà embarqué');
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: { isScanned: true, scannedAt: new Date(), scannedBy: agentId },
+    });
+  }
+
   async scanTicket(qrData: string, agentId: string) {
     let parsed: any;
     try {
@@ -362,41 +492,64 @@ export class PaymentsService {
     errorUrl: string;
     metadata: Record<string, any>;
   }) {
+    const apiKey    = this.config.get('GENIUSPAY_API_KEY');
+    const apiSecret = this.config.get('GENIUSPAY_API_SECRET');
+    const body = {
+      amount: params.amount,
+      currency: 'XOF',
+      description: params.description,
+      customer: {
+        name: params.customer.name,
+        email: params.customer.email,
+        phone: params.customer.phone,
+        country: 'CI',
+      },
+      success_url: params.successUrl,
+      error_url: params.errorUrl,
+      metadata: params.metadata,
+    };
+    this.logger.debug(`GeniusPay request → ${GENIUSPAY_BASE}/payments ${JSON.stringify(body)}`);
+
     try {
-      const response = await axios.post(
-        `${GENIUSPAY_BASE}/payments`,
-        {
-          amount: params.amount,
-          currency: 'XOF',
-          description: params.description,
-          customer: {
-            name: params.customer.name,
-            email: params.customer.email,
-            phone: params.customer.phone,
-            country: 'CI',
-          },
-          success_url: params.successUrl,
-          error_url: params.errorUrl,
-          metadata: params.metadata,
+      const response = await axios.post(`${GENIUSPAY_BASE}/payments`, body, {
+        headers: {
+          'X-API-Key': apiKey,
+          'X-API-Secret': apiSecret,
+          'Content-Type': 'application/json',
         },
-        {
-          headers: {
-            'X-API-Key': this.config.get('GENIUSPAY_API_KEY'),
-            'X-API-Secret': this.config.get('GENIUSPAY_API_SECRET'),
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      return response.data.data;
+        timeout: 15_000,
+      });
+      this.logger.debug(`GeniusPay raw response: ${JSON.stringify(response.data)}`);
+      // Support both { data: {...} } and flat response shapes
+      return response.data?.data ?? response.data;
     } catch (error: any) {
-      const msg = error?.response?.data?.error?.message ?? 'Erreur lors de l\'initiation du paiement';
+      this.logger.error(
+        `GeniusPay HTTP error ${error?.response?.status}: ${JSON.stringify(error?.response?.data)}`,
+      );
+      const msg =
+        error?.response?.data?.error?.message ??
+        error?.response?.data?.message ??
+        error?.message ??
+        'Erreur lors de l\'initiation du paiement';
       throw new BadRequestException(msg);
     }
   }
 
+  /** Extrait le canal de paiement depuis un objet de réponse Genius Pay. */
+  private _extractChannel(data: any): string | undefined {
+    // Genius Pay peut retourner le canal sous différents noms de champs
+    const raw: string | undefined =
+      data?.payment_method ??
+      data?.channel ??
+      data?.payment_channel ??
+      data?.provider ??
+      undefined;
+    return raw ? raw.toLowerCase() : undefined;
+  }
+
   private signTicket(data: object): string {
     return crypto
-      .createHmac('sha256', this.config.get('ENCRYPTION_KEY', 'default-key'))
+      .createHmac('sha256', this.encryptionKey)
       .update(JSON.stringify(data))
       .digest('hex');
   }

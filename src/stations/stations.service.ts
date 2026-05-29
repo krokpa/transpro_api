@@ -12,6 +12,74 @@ import dayjs from 'dayjs';
 export class StationsService {
   constructor(private prisma: PrismaService) {}
 
+  async findByCity(cityName: string) {
+    return this.prisma.station.findMany({
+      where: {
+        isActive: true,
+        city: { name: { contains: cityName, mode: 'insensitive' } },
+      },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        code: true,
+        latitude: true,
+        longitude: true,
+        city: { select: { id: true, name: true } },
+        tenant: { select: { id: true, name: true, slug: true, logo: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async findPublicInfo(stationId: string) {
+    const station = await this.prisma.station.findFirst({
+      where: { id: stationId, isActive: true },
+      select: {
+        id: true, name: true, address: true, phone: true, code: true,
+        latitude: true, longitude: true,
+        city: { select: { id: true, name: true, region: true } },
+        tenant: { select: { id: true, name: true, slug: true, logo: true, phone: true } },
+      },
+    });
+
+    if (!station) throw new NotFoundException('Gare introuvable');
+
+    const now = new Date();
+    const tomorrow = dayjs().add(1, 'day').endOf('day').toDate();
+
+    const upcomingDepartures = await this.prisma.trip.findMany({
+      where: {
+        departureStationId: stationId,
+        status: { in: ['SCHEDULED', 'BOARDING'] },
+        departureAt: { gte: now, lte: tomorrow },
+        availableSeats: { gt: 0 },
+      },
+      select: {
+        id: true,
+        departureAt: true,
+        price: true,
+        tripClass: true,
+        availableSeats: true,
+        route: {
+          select: {
+            name: true,
+            originCity: { select: { name: true } },
+            destinationCity: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { departureAt: 'asc' },
+      take: 10,
+    });
+
+    const totalDepartures = await this.prisma.trip.count({
+      where: { departureStationId: stationId },
+    });
+
+    return { ...station, upcomingDepartures, totalDepartures };
+  }
+
   async create(tenantId: string, dto: CreateStationDto) {
     return this.prisma.station.create({
       data: { ...dto, tenantId },

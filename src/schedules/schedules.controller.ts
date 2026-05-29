@@ -5,6 +5,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SchedulesService } from './schedules.service';
 import { CreateScheduleDto, UpdateScheduleDto, GenerateTripsDto } from './dto/schedule.dto';
+import { CreateClosureDayDto } from './dto/closure.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -71,5 +72,35 @@ export class SchedulesController {
     @Body() dto: GenerateTripsDto,
   ) {
     return this.schedules.generateAll(tenantId, dto.daysAhead);
+  }
+
+  // ─── Jours fériés / Fermetures ────────────────────────────────────────────
+
+  @Get('closures/national')
+  @ApiOperation({ summary: 'Lister les jours fériés nationaux CI' })
+  nationalHolidays() {
+    return this.schedules.findNationalHolidays();
+  }
+
+  @Get('closures')
+  @ApiOperation({ summary: 'Lister les jours de fermeture de la compagnie' })
+  findClosures(@CurrentUser('tenantId') tenantId: string) {
+    return this.schedules.findClosures(tenantId);
+  }
+
+  @Post('closures')
+  @ApiOperation({ summary: 'Ajouter un jour de fermeture' })
+  createClosure(
+    @CurrentUser('tenantId') tenantId: string,
+    @Body() dto: CreateClosureDayDto,
+  ) {
+    return this.schedules.createClosure(tenantId, dto);
+  }
+
+  @Delete('closures/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Supprimer un jour de fermeture' })
+  removeClosure(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.schedules.removeClosure(id, tenantId);
   }
 }

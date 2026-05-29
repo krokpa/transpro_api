@@ -116,7 +116,7 @@ describe('AuthService', () => {
       const result = await service.login({
         email: 'test@example.ci',
         password: 'SecurePass123!',
-      });
+      }) as any;
 
       expect(result.accessToken).toBe('mock-access-token');
       expect(result.user.email).toBe('test@example.ci');

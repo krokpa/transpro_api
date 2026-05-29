@@ -130,6 +130,48 @@ describe('SchedulesService', () => {
       );
     });
 
+    it('should store arrivalStationId when provided', async () => {
+      mockPrisma.route.findFirst.mockResolvedValue(mockRoute);
+      mockPrisma.vehicle.findFirst.mockResolvedValue(mockVehicle);
+      mockPrisma.schedule.create.mockResolvedValue({
+        ...mockSchedule,
+        arrivalStationId: 'station-2',
+      });
+
+      await service.create(TENANT_ID, { ...dto, arrivalStationId: 'station-2' });
+
+      expect(mockPrisma.schedule.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ arrivalStationId: 'station-2' }),
+        }),
+      );
+    });
+
+    it('should store both stations when both are provided', async () => {
+      mockPrisma.route.findFirst.mockResolvedValue(mockRoute);
+      mockPrisma.vehicle.findFirst.mockResolvedValue(mockVehicle);
+      mockPrisma.schedule.create.mockResolvedValue({
+        ...mockSchedule,
+        departureStationId: 'station-1',
+        arrivalStationId:   'station-2',
+      });
+
+      await service.create(TENANT_ID, {
+        ...dto,
+        departureStationId: 'station-1',
+        arrivalStationId:   'station-2',
+      });
+
+      expect(mockPrisma.schedule.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            departureStationId: 'station-1',
+            arrivalStationId:   'station-2',
+          }),
+        }),
+      );
+    });
+
     it('should create schedule without vehicle when vehicleId is omitted', async () => {
       mockPrisma.route.findFirst.mockResolvedValue(mockRoute);
       mockPrisma.schedule.create.mockResolvedValue({ ...mockSchedule, vehicleId: undefined });
@@ -283,23 +325,47 @@ describe('SchedulesService', () => {
     });
 
     it('should propagate departureStationId to generated trips', async () => {
-      const scheduleWithStation = { ...mockSchedule, departureStationId: 'station-1' };
+      const scheduleWithStation = { ...mockSchedule, departureStationId: 'station-1', arrivalStationId: null };
       mockPrisma.schedule.findFirst.mockResolvedValue(scheduleWithStation);
       mockPrisma.vehicle.findUnique.mockResolvedValue(mockVehicle);
-      mockPrisma.trip.findFirst.mockResolvedValue(null); // no existing trip
+      mockPrisma.trip.findFirst.mockResolvedValue(null);
       mockPrisma.trip.create.mockResolvedValue({ id: 'new-trip' });
 
       await service.generateFromSchedule(TENANT_ID, 'schedule-1', 1);
 
-      // Every created trip should carry the station id
       const calls = (mockPrisma.trip.create as jest.Mock).mock.calls;
       for (const [arg] of calls) {
         expect(arg.data).toHaveProperty('departureStationId', 'station-1');
+        expect(arg.data.arrivalStationId).toBeUndefined();
+      }
+    });
+
+    it('should propagate arrivalStationId to generated trips', async () => {
+      const scheduleWithStation = {
+        ...mockSchedule,
+        departureStationId: 'station-1',
+        arrivalStationId:   'station-2',
+      };
+      mockPrisma.schedule.findFirst.mockResolvedValue(scheduleWithStation);
+      mockPrisma.vehicle.findUnique.mockResolvedValue(mockVehicle);
+      mockPrisma.trip.findFirst.mockResolvedValue(null);
+      mockPrisma.trip.create.mockResolvedValue({ id: 'new-trip' });
+
+      await service.generateFromSchedule(TENANT_ID, 'schedule-1', 1);
+
+      const calls = (mockPrisma.trip.create as jest.Mock).mock.calls;
+      for (const [arg] of calls) {
+        expect(arg.data).toHaveProperty('departureStationId', 'station-1');
+        expect(arg.data).toHaveProperty('arrivalStationId',   'station-2');
       }
     });
 
     it('should NOT set departureStationId when schedule has none', async () => {
-      mockPrisma.schedule.findFirst.mockResolvedValue({ ...mockSchedule, departureStationId: null });
+      mockPrisma.schedule.findFirst.mockResolvedValue({
+        ...mockSchedule,
+        departureStationId: null,
+        arrivalStationId:   null,
+      });
       mockPrisma.vehicle.findUnique.mockResolvedValue(mockVehicle);
       mockPrisma.trip.findFirst.mockResolvedValue(null);
       mockPrisma.trip.create.mockResolvedValue({ id: 'new-trip' });
@@ -309,6 +375,7 @@ describe('SchedulesService', () => {
       const calls = (mockPrisma.trip.create as jest.Mock).mock.calls;
       for (const [arg] of calls) {
         expect(arg.data.departureStationId).toBeUndefined();
+        expect(arg.data.arrivalStationId).toBeUndefined();
       }
     });
   });

@@ -22,6 +22,11 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   preferredLang?: string;
+
+  @ApiPropertyOptional({ description: 'Photo de profil en base64 (data URL)' })
+  @IsOptional()
+  @IsString()
+  avatar?: string;
 }
 
 export class ChangePasswordDto {

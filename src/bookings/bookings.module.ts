@@ -5,9 +5,10 @@ import { BookingsController } from './bookings.controller';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PushModule } from '../push/push.module';
 
 @Module({
-  imports: [ConfigModule, RealtimeModule, PaymentsModule, NotificationsModule],
+  imports: [ConfigModule, RealtimeModule, PaymentsModule, NotificationsModule, PushModule],
   controllers: [BookingsController],
   providers: [BookingsService],
   exports: [BookingsService],

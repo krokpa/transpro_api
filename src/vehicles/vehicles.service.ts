@@ -63,6 +63,7 @@ export class VehiclesService {
         capacity: dto.capacity,
         seatLayout,
         status: 'ACTIVE',
+        advancedSeatManagement: dto.advancedSeatManagement ?? true,
       },
     });
   }
@@ -110,6 +111,109 @@ export class VehiclesService {
     return this.prisma.vehicle.update({
       where: { id },
       data: { status: 'INACTIVE' },
+    });
+  }
+
+  // ── Fuel logs ──────────────────────────────────────────────────────────────
+
+  async getFuelLogs(vehicleId: string, tenantId: string) {
+    await this.findOne(vehicleId, tenantId);
+    return this.prisma.fuelLog.findMany({
+      where: { vehicleId },
+      orderBy: { date: 'desc' },
+      take: 50,
+      include: { driver: { select: { firstName: true, lastName: true } } },
+    });
+  }
+
+  async addFuelLog(vehicleId: string, tenantId: string, dto: {
+    date: string; liters: number; pricePerLiter?: number; totalCost: number;
+    odometer?: number; station?: string; driverId?: string; notes?: string;
+  }) {
+    await this.findOne(vehicleId, tenantId);
+    const log = await this.prisma.fuelLog.create({
+      data: {
+        vehicleId, tenantId,
+        date:          new Date(dto.date),
+        liters:        dto.liters,
+        pricePerLiter: dto.pricePerLiter,
+        totalCost:     dto.totalCost,
+        odometer:      dto.odometer,
+        station:       dto.station,
+        driverId:      dto.driverId,
+        notes:         dto.notes,
+      },
+    });
+    if (dto.odometer) {
+      await this.prisma.vehicle.update({
+        where: { id: vehicleId },
+        data: { currentOdometer: dto.odometer },
+      });
+    }
+    return log;
+  }
+
+  async deleteFuelLog(vehicleId: string, logId: string, tenantId: string) {
+    await this.findOne(vehicleId, tenantId);
+    return this.prisma.fuelLog.delete({ where: { id: logId } });
+  }
+
+  // ── Maintenance logs ───────────────────────────────────────────────────────
+
+  async getMaintenanceLogs(vehicleId: string, tenantId: string) {
+    await this.findOne(vehicleId, tenantId);
+    return this.prisma.maintenanceLog.findMany({
+      where: { vehicleId },
+      orderBy: { date: 'desc' },
+      take: 50,
+    });
+  }
+
+  async addMaintenanceLog(vehicleId: string, tenantId: string, dto: {
+    type: string; date: string; description: string; odometer?: number; cost?: number;
+    nextDueAt?: string; nextDueKm?: number; garage?: string; notes?: string;
+  }) {
+    await this.findOne(vehicleId, tenantId);
+    const log = await this.prisma.maintenanceLog.create({
+      data: {
+        vehicleId, tenantId,
+        type:        dto.type as any,
+        date:        new Date(dto.date),
+        description: dto.description,
+        odometer:    dto.odometer,
+        cost:        dto.cost,
+        nextDueAt:   dto.nextDueAt ? new Date(dto.nextDueAt) : undefined,
+        nextDueKm:   dto.nextDueKm,
+        garage:      dto.garage,
+        notes:       dto.notes,
+      },
+    });
+    await this.prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: {
+        lastServiceAt: new Date(dto.date),
+        ...(dto.nextDueAt ? { nextServiceAt: new Date(dto.nextDueAt) } : {}),
+        ...(dto.odometer ? { currentOdometer: dto.odometer } : {}),
+      },
+    });
+    return log;
+  }
+
+  async deleteMaintenanceLog(vehicleId: string, logId: string, tenantId: string) {
+    await this.findOne(vehicleId, tenantId);
+    return this.prisma.maintenanceLog.delete({ where: { id: logId } });
+  }
+
+  async getMaintenanceAlerts(tenantId: string) {
+    const soon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    return this.prisma.vehicle.findMany({
+      where: {
+        tenantId,
+        status: 'ACTIVE',
+        nextServiceAt: { lte: soon },
+      },
+      select: { id: true, plate: true, brand: true, model: true, nextServiceAt: true, currentOdometer: true },
+      orderBy: { nextServiceAt: 'asc' },
     });
   }
 }

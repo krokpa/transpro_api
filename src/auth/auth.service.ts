@@ -8,6 +8,8 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
+import { generateSecret, generateSync, verifySync, generateURI } from 'otplib';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { RegisterDto, LoginDto } from './dto/register.dto';
@@ -84,9 +86,139 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
+    // 2FA actif → retourner un token de challenge temporaire
+    if (user.totpEnabled) {
+      const twoFactorToken = await this.jwt.signAsync(
+        { sub: user.id, type: '2fa_required' },
+        { secret: this.config.get('JWT_SECRET'), expiresIn: '5m' },
+      );
+      return { requires2fa: true, twoFactorToken };
+    }
+
     const { passwordHash: _, ...userWithoutPassword } = user;
     const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined);
     return { user: userWithoutPassword, ...tokens };
+  }
+
+  async verifyTotpLogin(twoFactorToken: string, code: string) {
+    let payload: any;
+    try {
+      payload = await this.jwt.verifyAsync(twoFactorToken, {
+        secret: this.config.get('JWT_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException('Token 2FA invalide ou expiré');
+    }
+
+    if (payload.type !== '2fa_required') {
+      throw new UnauthorizedException('Token 2FA invalide');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: {
+        userStations: {
+          where: { station: { isActive: true } },
+          include: { station: { select: { id: true, name: true, code: true, isActive: true, city: { select: { name: true } } } } },
+          orderBy: { isPrimary: 'desc' },
+        },
+      },
+    });
+
+    if (!user || !user.isActive || !user.totpEnabled || !user.totpSecret) {
+      throw new UnauthorizedException('Utilisateur invalide');
+    }
+
+    // Vérifier code TOTP
+    const totpResult = verifySync({ token: code, secret: user.totpSecret });
+    const isValidTotp = typeof totpResult === 'object' ? totpResult.valid : totpResult;
+
+    // Sinon, tenter les codes de secours
+    if (!isValidTotp) {
+      const matchIdx = await this.findBackupCode(user.totpBackupCodes, code);
+      if (matchIdx === -1) {
+        throw new UnauthorizedException('Code incorrect');
+      }
+      // Consommer le code de secours
+      const newCodes = [...user.totpBackupCodes];
+      newCodes.splice(matchIdx, 1);
+      await this.prisma.user.update({ where: { id: user.id }, data: { totpBackupCodes: newCodes } });
+    }
+
+    const { passwordHash: _, totpSecret: __, totpBackupCodes: ___, ...userWithoutSecrets } = user;
+    const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined);
+    return { user: userWithoutSecrets, ...tokens };
+  }
+
+  async generateTotpSetup(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+    if (user.totpEnabled) throw new BadRequestException('Le 2FA est déjà activé');
+
+    const secret = generateSecret();
+    const otpAuthUri = generateURI({ label: user.email, issuer: 'TransPro CI', secret });
+
+    // Stocker le secret temporairement (pas encore activé)
+    await this.prisma.user.update({ where: { id: userId }, data: { totpSecret: secret } });
+
+    return { secret, otpAuthUri };
+  }
+
+  async enableTotp(userId: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+    if (user.totpEnabled) throw new BadRequestException('Le 2FA est déjà activé');
+    if (!user.totpSecret) throw new BadRequestException('Lance /auth/2fa/setup d\'abord');
+
+    const verifyResult = verifySync({ token: code, secret: user.totpSecret });
+    const isValid = typeof verifyResult === 'object' ? verifyResult.valid : verifyResult;
+    if (!isValid) throw new BadRequestException('Code TOTP incorrect');
+
+    // Générer 10 codes de secours
+    const backupCodes = Array.from({ length: 10 }, () =>
+      crypto.randomBytes(4).toString('hex').toUpperCase(),
+    );
+    const hashedCodes = await Promise.all(backupCodes.map((c) => bcrypt.hash(c, 10)));
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { totpEnabled: true, totpBackupCodes: hashedCodes },
+    });
+
+    return {
+      message: '2FA activé avec succès',
+      backupCodes,
+    };
+  }
+
+  async disableTotp(userId: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+    if (!user.totpEnabled || !user.totpSecret) {
+      throw new BadRequestException('Le 2FA n\'est pas activé');
+    }
+
+    const disableVerifyResult = verifySync({ token: code, secret: user.totpSecret });
+    const isValidDisable = typeof disableVerifyResult === 'object' ? disableVerifyResult.valid : disableVerifyResult;
+    if (!isValidDisable) {
+      const matchIdx = await this.findBackupCode(user.totpBackupCodes, code);
+      if (matchIdx === -1) throw new BadRequestException('Code incorrect');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { totpEnabled: false, totpSecret: null, totpBackupCodes: [] },
+    });
+
+    return { message: '2FA désactivé' };
+  }
+
+  private async findBackupCode(hashedCodes: string[], code: string): Promise<number> {
+    for (let i = 0; i < hashedCodes.length; i++) {
+      const match = await bcrypt.compare(code, hashedCodes[i]);
+      if (match) return i;
+    }
+    return -1;
   }
 
   async refreshTokens(refreshToken: string): Promise<AuthTokens> {

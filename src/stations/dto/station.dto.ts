@@ -1,4 +1,5 @@
-import { IsString, IsNotEmpty, IsOptional, IsBoolean, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsBoolean, IsNumber, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateStationDto {
@@ -27,6 +28,18 @@ export class CreateStationDto {
   @IsString()
   @MaxLength(10)
   code?: string;
+
+  @ApiPropertyOptional({ example: 5.3484 })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  latitude?: number;
+
+  @ApiPropertyOptional({ example: -4.0083 })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  longitude?: number;
 }
 
 export class UpdateStationDto {
@@ -60,6 +73,18 @@ export class UpdateStationDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ example: 5.3484 })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  latitude?: number;
+
+  @ApiPropertyOptional({ example: -4.0083 })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  longitude?: number;
 }
 
 export class AssignMemberDto {
