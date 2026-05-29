@@ -13,7 +13,7 @@ import { generateSecret, generateSync, verifySync, generateURI } from 'otplib';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { RegisterDto, LoginDto } from './dto/register.dto';
-import { JwtPayload, AuthTokens } from '@transpro/shared';
+import { JwtPayload, AuthTokens, PERM } from '@transpro/shared';
 import { nanoid } from 'nanoid';
 
 @Injectable()
@@ -213,6 +213,33 @@ export class AuthService {
     return { message: '2FA désactivé' };
   }
 
+  private async loadUserPermissions(userId: string, role: string): Promise<string[]> {
+    if (role === 'SUPER_ADMIN') return Object.values(PERM);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        companyProfile: {
+          select: { permissions: { select: { permissionCode: true } } },
+        },
+        userStations: {
+          select: {
+            stationProfile: {
+              select: { permissions: { select: { permissionCode: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    const companyPerms = user?.companyProfile?.permissions.map((p) => p.permissionCode) ?? [];
+    const stationPerms = user?.userStations.flatMap(
+      (s) => s.stationProfile?.permissions.map((p) => p.permissionCode) ?? [],
+    ) ?? [];
+
+    return [...new Set([...companyPerms, ...stationPerms])];
+  }
+
   private async findBackupCode(hashedCodes: string[], code: string): Promise<number> {
     for (let i = 0; i < hashedCodes.length; i++) {
       const match = await bcrypt.compare(code, hashedCodes[i]);
@@ -342,7 +369,9 @@ export class AuthService {
     role: any,
     tenantId?: string,
   ): Promise<AuthTokens> {
-    const payload: JwtPayload = { sub: userId, email, role, tenantId };
+    // Charger les permissions RBAC pour le JWT
+    const perms = await this.loadUserPermissions(userId, role);
+    const payload: JwtPayload = { sub: userId, email, role, tenantId, perms };
 
     const [accessToken, rawRefresh] = await Promise.all([
       this.jwt.signAsync(payload, {

@@ -3,7 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { JwtPayload } from '@transpro/shared';
+import { JwtPayload, PERM, UserRole } from '@transpro/shared';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -30,12 +30,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         role: true,
         tenantId: true,
         isActive: true,
+        companyProfileId: true,
         tenant: { select: { plan: true, status: true } },
+        companyProfile: {
+          select: {
+            permissions: { select: { permissionCode: true } },
+          },
+        },
         userStations: {
           where: { station: { isActive: true } },
-          select: { stationId: true, isPrimary: true },
+          select: {
+            stationId: true,
+            isPrimary: true,
+            stationProfileId: true,
+            stationProfile: {
+              select: {
+                permissions: { select: { permissionCode: true } },
+              },
+            },
+          },
           orderBy: { isPrimary: 'desc' },
-          take: 1,
         },
       },
     });
@@ -44,10 +58,29 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Compte désactivé ou introuvable');
     }
 
-    const { userStations, ...rest } = user;
+    // SUPER_ADMIN a toutes les permissions sans profil
+    const isSuperAdmin = user.role === UserRole.SUPER_ADMIN;
+    let perms: string[] = isSuperAdmin ? Object.values(PERM) : [];
+
+    if (!isSuperAdmin) {
+      // Permissions du profil compagnie
+      const companyPerms = user.companyProfile?.permissions.map((p) => p.permissionCode) ?? [];
+
+      // Permissions du profil de la gare primaire
+      const primaryStation = user.userStations.find((s) => s.isPrimary) ?? user.userStations[0];
+      const stationPerms = primaryStation?.stationProfile?.permissions.map((p) => p.permissionCode) ?? [];
+
+      // Union sans doublons
+      perms = [...new Set([...companyPerms, ...stationPerms])];
+    }
+
+    const { userStations, companyProfile, ...rest } = user;
     return {
       ...rest,
-      stationId: userStations[0]?.stationId ?? null,
+      stationId: userStations.find((s) => s.isPrimary)?.stationId ?? userStations[0]?.stationId ?? null,
+      // Toutes les gares de l'utilisateur avec leurs profils (pour verifyAccess)
+      stationIds: userStations.map((s) => s.stationId),
+      perms,
     };
   }
 }

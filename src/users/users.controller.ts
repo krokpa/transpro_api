@@ -16,19 +16,22 @@ import { UsersService } from './users.service';
 import { UpdateUserDto, ChangePasswordDto, AddToTenantDto, InviteTeamMemberDto, UpdateRoleDto } from './dto/user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '@transpro/shared';
+import { PERM, UserRole } from '@transpro/shared';
 
 @ApiTags('Utilisateurs')
 @Controller({ path: 'users', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @ApiBearerAuth()
 export class UsersController {
   constructor(private usersService: UsersService) {}
 
   @Get('lookup')
-  @ApiOperation({ summary: 'Rechercher un passager inscrit par numéro de téléphone' })
+  @RequirePermission(PERM.BOOKINGS_GUICHET)
+  @ApiOperation({ summary: 'Rechercher un passager inscrit par numéro de téléphone (guichet)' })
   lookupByPhone(@Query('phone') phone: string) {
     if (!phone) return null;
     return this.usersService.lookupByPhone(phone);

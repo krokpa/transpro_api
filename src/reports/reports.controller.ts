@@ -2,15 +2,15 @@ import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { UserRole } from '@transpro/shared';
+import { PERM } from '@transpro/shared';
 
 @ApiTags('Rapports')
 @Controller({ path: 'reports', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission(PERM.REPORTS_COMPANY)
 @ApiBearerAuth()
 export class ReportsController {
   constructor(private reports: ReportsService) {}

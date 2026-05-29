@@ -29,6 +29,7 @@ import { SmsModule } from './sms/sms.module';
 import { LuggageModule } from './luggage/luggage.module';
 import { RefundsModule } from './refunds/refunds.module';
 import { PushModule } from './push/push.module';
+import { PermissionsModule } from './permissions/permissions.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { PaymentRedirectController } from './payment-redirect.controller';
 
@@ -77,6 +78,7 @@ import { PaymentRedirectController } from './payment-redirect.controller';
     LuggageModule,
     RefundsModule,
     PushModule,
+    PermissionsModule,
   ],
 })
 export class AppModule implements NestModule {

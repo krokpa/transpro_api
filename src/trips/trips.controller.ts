@@ -1,26 +1,19 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Body,
-  Param,
-  Query,
-  UseGuards,
+  Controller, Get, Post, Patch, Body, Param, Query, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TripsService } from './trips.service';
 import { CreateTripDto, UpdateTripStatusDto, SearchTripsDto } from './dto/trip.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
-import { UserRole, TripStatus } from '@transpro/shared';
+import { PERM, TripStatus, UserRole } from '@transpro/shared';
 
 @ApiTags('Voyages')
 @Controller({ path: 'trips', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class TripsController {
   constructor(private trips: TripsService) {}
 
@@ -40,7 +33,7 @@ export class TripsController {
 
   @Post()
   @ApiBearerAuth()
-  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @RequirePermission(PERM.TRIPS_CREATE)
   @ApiOperation({ summary: 'Créer un voyage' })
   create(@CurrentUser('tenantId') tenantId: string, @Body() dto: CreateTripDto) {
     return this.trips.create(tenantId, dto);
@@ -48,7 +41,7 @@ export class TripsController {
 
   @Get()
   @ApiBearerAuth()
-  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @RequirePermission(PERM.TRIPS_VIEW)
   @ApiOperation({ summary: 'Lister les voyages de la compagnie' })
   findAll(
     @CurrentUser() currentUser: any,
@@ -64,6 +57,7 @@ export class TripsController {
 
   @Get(':id')
   @ApiBearerAuth()
+  @RequirePermission(PERM.TRIPS_VIEW)
   @ApiOperation({ summary: 'Détails d\'un voyage' })
   findOne(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
     return this.trips.findOne(id, tenantId);
@@ -71,6 +65,7 @@ export class TripsController {
 
   @Get(':id/seats')
   @ApiBearerAuth()
+  @RequirePermission(PERM.TRIPS_VIEW)
   @ApiOperation({ summary: 'Sièges d\'un voyage (temps réel)' })
   getSeats(@Param('id') id: string) {
     return this.trips.getSeats(id);
@@ -78,7 +73,7 @@ export class TripsController {
 
   @Patch(':id/status')
   @ApiBearerAuth()
-  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @RequirePermission(PERM.TRIPS_UPDATE_STATUS)
   @ApiOperation({ summary: 'Mettre à jour le statut d\'un voyage' })
   updateStatus(
     @Param('id') id: string,
@@ -90,7 +85,7 @@ export class TripsController {
 
   @Patch(':id/seats/:seatNumber/toggle-block')
   @ApiBearerAuth()
-  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @RequirePermission(PERM.TRIPS_VIEW)
   @ApiOperation({ summary: 'Bloquer / débloquer un siège' })
   toggleSeatBlock(
     @Param('id') id: string,
@@ -102,7 +97,7 @@ export class TripsController {
 
   @Get(':id/manifest')
   @ApiBearerAuth()
-  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @RequirePermission(PERM.BOOKINGS_VIEW)
   @ApiOperation({ summary: 'Manifeste des passagers d\'un voyage' })
   getManifest(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
     return this.trips.manifest(id, tenantId);
@@ -110,7 +105,7 @@ export class TripsController {
 
   @Get(':id/seats/:seatNumber/booking')
   @ApiBearerAuth()
-  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @RequirePermission(PERM.BOOKINGS_VIEW)
   @ApiOperation({ summary: 'Infos de réservation d\'un siège' })
   getSeatBooking(
     @Param('id') id: string,
