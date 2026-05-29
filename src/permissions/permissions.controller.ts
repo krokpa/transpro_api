@@ -7,9 +7,10 @@ import { PermissionsService } from './permissions.service';
 import { CreateProfileDto, UpdateProfileDto, AssignCompanyProfileDto, AssignStationProfileDto } from './dto/permission.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { PlanGuard, RequiresPlan } from '../common/guards/plan.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { UserRole } from '@transpro/shared';
+import { UserRole, TenantPlan } from '@transpro/shared';
 
 @ApiTags('Permissions & Profils')
 @Controller({ path: 'permissions', version: '1' })
@@ -52,14 +53,18 @@ export class PermissionsController {
 
   @Post('profiles')
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
-  @ApiOperation({ summary: 'Créer un profil custom' })
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.ENTERPRISE)
+  @ApiOperation({ summary: 'Créer un profil custom (ENTERPRISE)' })
   createProfile(@CurrentUser('tenantId') tenantId: string, @Body() dto: CreateProfileDto) {
     return this.perms.createProfile(tenantId, dto);
   }
 
   @Patch('profiles/:id')
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
-  @ApiOperation({ summary: 'Modifier un profil custom' })
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.ENTERPRISE)
+  @ApiOperation({ summary: 'Modifier un profil custom (ENTERPRISE)' })
   updateProfile(
     @Param('id') id: string,
     @CurrentUser('tenantId') tenantId: string,

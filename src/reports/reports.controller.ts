@@ -3,14 +3,16 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { PlanGuard, RequiresPlan } from '../common/guards/plan.guard';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERM } from '@transpro/shared';
+import { PERM, TenantPlan } from '@transpro/shared';
 
 @ApiTags('Rapports')
 @Controller({ path: 'reports', version: '1' })
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, PlanGuard)
 @RequirePermission(PERM.REPORTS_COMPANY)
+@RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
 @ApiBearerAuth()
 export class ReportsController {
   constructor(private reports: ReportsService) {}

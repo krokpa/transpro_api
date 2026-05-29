@@ -6,13 +6,15 @@ import { TicketTemplatesService } from './ticket-templates.service';
 import { CreateTicketTemplateDto, UpdateTicketTemplateDto } from './dto/ticket-template.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { PlanGuard, RequiresPlan } from '../common/guards/plan.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { UserRole } from '@transpro/shared';
+import { UserRole, TenantPlan } from '@transpro/shared';
 
 @ApiTags('Modèles de tickets')
 @Controller({ path: 'ticket-templates', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+@RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
 @ApiBearerAuth()
 export class TicketTemplatesController {
   constructor(private service: TicketTemplatesService) {}

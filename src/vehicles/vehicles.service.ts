@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PlanLimitsService } from '../common/plan-limits.service';
 import { CreateVehicleDto, UpdateVehicleDto } from './dto/vehicle.dto';
 
 @Injectable()
 export class VehiclesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private planLimits: PlanLimitsService,
+  ) {}
 
   private generateSeatLayout(rows: number, columns: number) {
     const columnLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
@@ -33,6 +37,8 @@ export class VehiclesService {
   }
 
   async create(tenantId: string, dto: CreateVehicleDto) {
+    await this.planLimits.assertLimit(tenantId, 'vehicles');
+
     const existing = await this.prisma.vehicle.findUnique({
       where: { plate: dto.plate },
     });

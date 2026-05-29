@@ -1,12 +1,18 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PlanLimitsService } from '../common/plan-limits.service';
 import { CreateDriverDto, UpdateDriverDto } from './dto/driver.dto';
 
 @Injectable()
 export class DriversService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private planLimits: PlanLimitsService,
+  ) {}
 
   async create(tenantId: string, dto: CreateDriverDto) {
+    await this.planLimits.assertLimit(tenantId, 'drivers');
+
     const existing = await this.prisma.driver.findFirst({
       where: { licenseNumber: dto.licenseNumber, tenantId },
     });

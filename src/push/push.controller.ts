@@ -4,8 +4,10 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PushService, WebPushSubscribeDto } from './push.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { PlanGuard, RequiresPlan } from '../common/guards/plan.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { TenantPlan } from '@transpro/shared';
 
 @ApiTags('Push Notifications')
 @Controller({ path: 'push', version: '1' })
@@ -22,7 +24,9 @@ export class PushController {
 
   @Post('web-subscribe')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Enregistrer un abonnement Web Push (dashboard staff)' })
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
+  @ApiOperation({ summary: 'Enregistrer un abonnement Web Push — PROFESSIONAL+ (dashboard staff)' })
   subscribe(@CurrentUser('id') userId: string, @Body() dto: WebPushSubscribeDto) {
     return this.push.subscribe(userId, dto);
   }

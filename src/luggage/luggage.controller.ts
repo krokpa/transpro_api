@@ -2,6 +2,7 @@ import {
   Body, Controller, Get, Param, Patch, Post,
   Query, UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { LuggageService } from './luggage.service';
 import { AddBagPhotosDto, DeclareLuggageDto, ReportMissingDto, ScanBagDto } from './dto/luggage.dto';
@@ -9,11 +10,14 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { UserRole } from '@transpro/shared';
+import { PlanGuard, RequiresPlan } from '../common/guards/plan.guard';
+import { UserRole, TenantPlan } from '@transpro/shared';
 
 @ApiTags('Bagages')
 @ApiBearerAuth()
 @Controller('luggage')
+@UseGuards(PlanGuard)
+@RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
 export class LuggageController {
   constructor(private readonly svc: LuggageService) {}
 

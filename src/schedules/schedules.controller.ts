@@ -8,13 +8,15 @@ import { CreateScheduleDto, UpdateScheduleDto, GenerateTripsDto } from './dto/sc
 import { CreateClosureDayDto } from './dto/closure.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { PlanGuard, RequiresPlan } from '../common/guards/plan.guard';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERM } from '@transpro/shared';
+import { PERM, TenantPlan } from '@transpro/shared';
 
 @ApiTags('Plannings')
 @Controller({ path: 'schedules', version: '1' })
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, PlanGuard)
+@RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
 @ApiBearerAuth()
 export class SchedulesController {
   constructor(private schedules: SchedulesService) {}

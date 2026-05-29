@@ -5,12 +5,16 @@
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PlanLimitsService } from '../common/plan-limits.service';
 import { CreateStationDto, UpdateStationDto, AssignMemberDto } from './dto/station.dto';
 import dayjs from 'dayjs';
 
 @Injectable()
 export class StationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private planLimits: PlanLimitsService,
+  ) {}
 
   async findByCity(cityName: string) {
     return this.prisma.station.findMany({
@@ -81,6 +85,7 @@ export class StationsService {
   }
 
   async create(tenantId: string, dto: CreateStationDto) {
+    await this.planLimits.assertLimit(tenantId, 'stations');
     return this.prisma.station.create({
       data: { ...dto, tenantId },
     });

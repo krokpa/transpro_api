@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UpdateUserDto, InviteTeamMemberDto } from './dto/user.dto';
 import { UserRole, NotificationType } from '@transpro/shared';
+import { PlanLimitsService } from '../common/plan-limits.service';
 
 const MEMBER_SELECT = {
   id: true,
@@ -30,6 +31,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private planLimits: PlanLimitsService,
   ) {}
 
   async findAll(tenantId: string) {
@@ -125,6 +127,8 @@ export class UsersService {
   }
 
   async inviteTeamMember(tenantId: string, dto: InviteTeamMemberDto) {
+    await this.planLimits.assertLimit(tenantId, 'users');
+
     const exists = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (exists) throw new ConflictException('Un compte avec cet email existe déjà');
 

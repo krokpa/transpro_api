@@ -12,19 +12,24 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TenantsService } from './tenants.service';
+import { PlanLimitsService } from '../common/plan-limits.service';
 import { CreateTenantDto, UpdateTenantDto } from './dto/tenant.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '@transpro/shared';
+import { UserRole, TenantPlan } from '@transpro/shared';
 import { Public } from '../common/decorators/public.decorator';
+import { PlanGuard, RequiresPlan } from '../common/guards/plan.guard';
 
 @ApiTags('Tenants / Compagnies')
 @Controller({ path: 'tenants', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TenantsController {
-  constructor(private tenantsService: TenantsService) {}
+  constructor(
+    private tenantsService: TenantsService,
+    private planLimitsService: PlanLimitsService,
+  ) {}
 
   @Public()
   @Get('public')
@@ -135,10 +140,20 @@ export class TenantsController {
     return this.tenantsService.getAllUsers(page, Math.min(limit, 100), search, role);
   }
 
+  @Get('me/usage')
+  @ApiBearerAuth()
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
+  @ApiOperation({ summary: 'Utilisation des ressources vs limites du plan' })
+  getUsage(@CurrentUser('tenantId') tenantId: string) {
+    return this.planLimitsService.getUsage(tenantId);
+  }
+
   @Get('me/analytics')
   @ApiBearerAuth()
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
-  @ApiOperation({ summary: 'Analytiques détaillées (revenus, routes, tendances)' })
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
+  @ApiOperation({ summary: 'Analytiques détaillées — PROFESSIONAL+ (revenus, routes, tendances)' })
   getAnalytics(
     @CurrentUser('tenantId') tenantId: string,
     @Query('period') period?: string,

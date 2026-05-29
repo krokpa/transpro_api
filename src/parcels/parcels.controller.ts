@@ -165,12 +165,12 @@ export class ParcelsController {
     return this.parcels.cancelDeliveryRequestByUser(parcelId, user.id);
   }
 
-  // Agent/Owner: list all delivery requests
+  // Agent/Owner: list all delivery requests — ENTERPRISE uniquement
   @Get('delivery-requests')
   @UseGuards(RolesGuard, PlanGuard)
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
-  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
-  @ApiOperation({ summary: 'Lister toutes les demandes de livraison du tenant' })
+  @RequiresPlan(TenantPlan.ENTERPRISE)
+  @ApiOperation({ summary: 'Lister toutes les demandes de livraison du tenant (ENTERPRISE)' })
   listDeliveryRequests(
     @CurrentUser() user: any,
     @Query('status') status?: string,
@@ -178,12 +178,12 @@ export class ParcelsController {
     return this.parcels.listDeliveryRequests(user.tenantId, status);
   }
 
-  // Agent/Owner: update delivery request (assign, change status)
+  // Agent/Owner: update delivery request — ENTERPRISE uniquement
   @Patch('delivery-requests/:reqId')
   @UseGuards(RolesGuard, PlanGuard)
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
-  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
-  @ApiOperation({ summary: 'Mettre à jour une demande de livraison' })
+  @RequiresPlan(TenantPlan.ENTERPRISE)
+  @ApiOperation({ summary: 'Mettre à jour une demande de livraison (ENTERPRISE)' })
   updateDeliveryRequest(
     @CurrentUser() user: any,
     @Param('reqId') reqId: string,

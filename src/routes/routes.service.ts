@@ -1,12 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PlanLimitsService } from '../common/plan-limits.service';
 import { CreateRouteDto, UpdateRouteDto } from './dto/route.dto';
 
 @Injectable()
 export class RoutesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private planLimits: PlanLimitsService,
+  ) {}
 
   async create(tenantId: string, dto: CreateRouteDto) {
+    await this.planLimits.assertLimit(tenantId, 'routes');
     const { stops, ...routeData } = dto;
 
     return this.prisma.$transaction(async (tx) => {
