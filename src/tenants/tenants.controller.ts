@@ -7,6 +7,8 @@ import {
   Param,
   Query,
   UseGuards,
+  DefaultValuePipe,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TenantsService } from './tenants.service';
@@ -100,6 +102,37 @@ export class TenantsController {
   @ApiOperation({ summary: 'Modifier statut/plan d\'une compagnie (Super Admin)' })
   updateById(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
     return this.tenantsService.update(id, dto);
+  }
+
+  @Get(':id/full-detail')
+  @ApiBearerAuth()
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Détail complet d\'un tenant pour le super admin' })
+  getTenantFullDetail(@Param('id') id: string) {
+    return this.tenantsService.getTenantFullDetail(id);
+  }
+
+  // ─── Super Admin — Stats & Users ─────────────────────────────────────────
+
+  @Get('admin/platform-stats')
+  @ApiBearerAuth()
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'KPIs globaux plateforme (Super Admin)' })
+  platformStats() {
+    return this.tenantsService.getPlatformStats();
+  }
+
+  @Get('admin/users')
+  @ApiBearerAuth()
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Tous les utilisateurs du système (Super Admin)' })
+  allUsers(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(30), ParseIntPipe) limit: number,
+    @Query('search') search?: string,
+    @Query('role') role?: string,
+  ) {
+    return this.tenantsService.getAllUsers(page, Math.min(limit, 100), search, role);
   }
 
   @Get('me/analytics')

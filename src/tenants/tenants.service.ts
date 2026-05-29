@@ -524,4 +524,119 @@ export class TenantsService {
       recentBookings,
     };
   }
+
+  // ─── Super Admin ───────────────────────────────────────────────────────────
+
+  /** KPIs globaux plateforme pour le dashboard super admin. */
+  async getPlatformStats() {
+    const thirtyDaysAgo = dayjs().subtract(30, 'day').toDate();
+
+    const [
+      totalTenants,
+      activeTenants,
+      trialTenants,
+      suspendedTenants,
+      newTenantsThisMonth,
+      totalUsers,
+      totalBookings,
+      totalRevenue,
+      revenueThisMonth,
+      totalTrips,
+      recentTenants,
+    ] = await Promise.all([
+      this.prisma.tenant.count(),
+      this.prisma.tenant.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.tenant.count({ where: { status: 'TRIAL' } }),
+      this.prisma.tenant.count({ where: { status: 'SUSPENDED' } }),
+      this.prisma.tenant.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      this.prisma.user.count({ where: { role: { not: 'SUPER_ADMIN' } } }),
+      this.prisma.booking.count({ where: { status: 'CONFIRMED' } }),
+      this.prisma.payment.aggregate({ where: { status: 'SUCCESS' }, _sum: { amount: true } }),
+      this.prisma.payment.aggregate({
+        where: { status: 'SUCCESS', paidAt: { gte: thirtyDaysAgo } },
+        _sum: { amount: true },
+      }),
+      this.prisma.trip.count(),
+      this.prisma.tenant.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: { id: true, name: true, slug: true, plan: true, status: true, createdAt: true },
+      }),
+    ]);
+
+    return {
+      tenants: { total: totalTenants, active: activeTenants, trial: trialTenants, suspended: suspendedTenants, newThisMonth: newTenantsThisMonth },
+      users: { total: totalUsers },
+      bookings: { confirmed: totalBookings },
+      revenue: { total: totalRevenue._sum.amount ?? 0, thisMonth: revenueThisMonth._sum.amount ?? 0 },
+      trips: { total: totalTrips },
+      recentTenants,
+    };
+  }
+
+  /** Détail complet d'un tenant pour le super admin. */
+  async getTenantFullDetail(id: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      include: {
+        city: { select: { name: true } },
+        subscriptions: { orderBy: { createdAt: 'desc' }, take: 6 },
+        _count: {
+          select: { users: true, routes: true, trips: true, bookings: true, drivers: true, vehicles: true, stations: true },
+        },
+      },
+    });
+    if (!tenant) throw new NotFoundException('Tenant introuvable');
+
+    const [revenue, bookings, users] = await Promise.all([
+      this.prisma.payment.aggregate({ where: { tenantId: id, status: 'SUCCESS' }, _sum: { amount: true, commissionAmount: true } }),
+      this.prisma.booking.groupBy({ by: ['status'], where: { tenantId: id }, _count: true }),
+      this.prisma.user.findMany({
+        where: { tenantId: id },
+        select: { id: true, firstName: true, lastName: true, email: true, phone: true, role: true, isActive: true, lastLoginAt: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    ]);
+
+    return {
+      ...tenant,
+      stats: {
+        totalRevenue: revenue._sum.amount ?? 0,
+        totalCommission: revenue._sum.commissionAmount ?? 0,
+        bookingsByStatus: Object.fromEntries(bookings.map((b) => [b.status, b._count])),
+      },
+      recentUsers: users,
+    };
+  }
+
+  /** Liste tous les utilisateurs du système (super admin). */
+  async getAllUsers(page = 1, limit = 30, search?: string, role?: string) {
+    const skip = (page - 1) * limit;
+    const where: any = { role: { not: 'SUPER_ADMIN' as any } };
+    if (role) where.role = role;
+    if (search) {
+      where.OR = [
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName:  { contains: search, mode: 'insensitive' } },
+        { email:     { contains: search, mode: 'insensitive' } },
+        { phone:     { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where, skip, take: limit,
+        select: {
+          id: true, firstName: true, lastName: true, email: true, phone: true,
+          role: true, isActive: true, createdAt: true, lastLoginAt: true,
+          tenant: { select: { id: true, name: true, slug: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
 }
