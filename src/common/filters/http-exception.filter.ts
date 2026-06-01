@@ -34,12 +34,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
       );
     }
 
+    const errorMessage =
+      typeof message === 'string' ? message : (message as any).message ?? 'Erreur interne';
+
     reply.status(status).send({
       success: false,
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request.url,
-      error: typeof message === 'string' ? message : (message as any).message,
+      message: errorMessage,   // ← champ attendu par le frontend
+      error: errorMessage,
       details: typeof message === 'object' ? message : undefined,
     });
   }

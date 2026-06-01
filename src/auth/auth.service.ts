@@ -13,7 +13,7 @@ import { generateSecret, generateSync, verifySync, generateURI } from 'otplib';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { RegisterDto, LoginDto } from './dto/register.dto';
-import { JwtPayload, AuthTokens, PERM } from '@transpro/shared';
+import { JwtPayload, AuthTokens, PERM, SYSTEM_PROFILES, UserRole } from '@transpro/shared';
 import { nanoid } from 'nanoid';
 
 @Injectable()
@@ -232,10 +232,28 @@ export class AuthService {
       },
     });
 
-    const companyPerms = user?.companyProfile?.permissions.map((p) => p.permissionCode) ?? [];
-    const stationPerms = user?.userStations.flatMap(
+    let companyPerms = user?.companyProfile?.permissions.map((p) => p.permissionCode) ?? [];
+
+    // Fallback par rôle si aucun profil assigné
+    if (companyPerms.length === 0) {
+      const roleProfileMap: Record<string, keyof typeof SYSTEM_PROFILES> = {
+        [UserRole.COMPANY_OWNER]: 'COMPANY_OWNER',
+        [UserRole.COMPANY_ADMIN]: 'COMPANY_ADMIN',
+        [UserRole.COMPANY_AGENT]: 'STATION_AGENT',
+      };
+      const defaultProfile = roleProfileMap[role];
+      if (defaultProfile) {
+        companyPerms = [...(SYSTEM_PROFILES[defaultProfile].permissions as string[])];
+      }
+    }
+
+    let stationPerms = user?.userStations.flatMap(
       (s) => s.stationProfile?.permissions.map((p) => p.permissionCode) ?? [],
     ) ?? [];
+
+    if (stationPerms.length === 0 && role === UserRole.COMPANY_AGENT) {
+      stationPerms = [...(SYSTEM_PROFILES.STATION_AGENT.permissions as string[])];
+    }
 
     return [...new Set([...companyPerms, ...stationPerms])];
   }

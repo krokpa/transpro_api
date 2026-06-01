@@ -3,7 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { JwtPayload, PERM, UserRole } from '@transpro/shared';
+import { JwtPayload, PERM, UserRole, SYSTEM_PROFILES } from '@transpro/shared';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -63,12 +63,30 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     let perms: string[] = isSuperAdmin ? Object.values(PERM) : [];
 
     if (!isSuperAdmin) {
-      // Permissions du profil compagnie
-      const companyPerms = user.companyProfile?.permissions.map((p) => p.permissionCode) ?? [];
+      // Permissions du profil compagnie explicitement assigné
+      let companyPerms = user.companyProfile?.permissions.map((p) => p.permissionCode) ?? [];
 
-      // Permissions du profil de la gare primaire
+      // Fallback : si aucun profil assigné, utiliser les permissions par défaut du rôle
+      // (pour les utilisateurs créés avant le système RBAC)
+      if (companyPerms.length === 0) {
+        const roleProfileMap: Record<string, keyof typeof SYSTEM_PROFILES> = {
+          [UserRole.COMPANY_OWNER]: 'COMPANY_OWNER',
+          [UserRole.COMPANY_ADMIN]: 'COMPANY_ADMIN',
+          [UserRole.COMPANY_AGENT]: 'STATION_AGENT',
+        };
+        const defaultProfile = roleProfileMap[user.role as string];
+        if (defaultProfile) {
+          companyPerms = [...(SYSTEM_PROFILES[defaultProfile].permissions as string[])];
+        }
+      }
+
+      // Permissions du profil de la gare primaire (ou fallback par rôle si non assigné)
       const primaryStation = user.userStations.find((s) => s.isPrimary) ?? user.userStations[0];
-      const stationPerms = primaryStation?.stationProfile?.permissions.map((p) => p.permissionCode) ?? [];
+      let stationPerms = primaryStation?.stationProfile?.permissions.map((p) => p.permissionCode) ?? [];
+
+      if (stationPerms.length === 0 && user.role === UserRole.COMPANY_AGENT) {
+        stationPerms = [...(SYSTEM_PROFILES.STATION_AGENT.permissions as string[])];
+      }
 
       // Union sans doublons
       perms = [...new Set([...companyPerms, ...stationPerms])];
