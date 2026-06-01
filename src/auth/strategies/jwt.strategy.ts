@@ -67,7 +67,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       let companyPerms = user.companyProfile?.permissions.map((p) => p.permissionCode) ?? [];
 
       // Fallback : si aucun profil assigné, utiliser les permissions par défaut du rôle
-      // (pour les utilisateurs créés avant le système RBAC)
+      // (pour les utilisateurs créés avant le système RBAC ou sans profil explicite)
       if (companyPerms.length === 0) {
         const roleProfileMap: Record<string, keyof typeof SYSTEM_PROFILES> = {
           [UserRole.COMPANY_OWNER]: 'COMPANY_OWNER',
@@ -77,6 +77,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         const defaultProfile = roleProfileMap[user.role as string];
         if (defaultProfile) {
           companyPerms = [...(SYSTEM_PROFILES[defaultProfile].permissions as string[])];
+        }
+        // Les passagers peuvent voir les voyages (détails, sièges) et leurs propres données
+        if (user.role === UserRole.PASSENGER) {
+          companyPerms = [PERM.TRIPS_VIEW];
         }
       }
 

@@ -245,6 +245,10 @@ export class AuthService {
       if (defaultProfile) {
         companyPerms = [...(SYSTEM_PROFILES[defaultProfile].permissions as string[])];
       }
+      // Les passagers voient les voyages (détails de réservation, suivi, sièges)
+      if (role === UserRole.PASSENGER) {
+        companyPerms = [PERM.TRIPS_VIEW];
+      }
     }
 
     let stationPerms = user?.userStations.flatMap(
