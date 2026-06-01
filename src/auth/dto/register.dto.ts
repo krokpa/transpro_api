@@ -32,6 +32,11 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+
+  @ApiProperty({ description: 'Token JWT retourné par POST /v1/otp/verify' })
+  @IsString()
+  @IsNotEmpty()
+  phoneVerificationToken: string;
 }
 
 export class LoginDto {

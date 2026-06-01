@@ -176,6 +176,36 @@ export const createMockPrisma = () => ({
     deleteMany: jest.fn(),
     upsert: jest.fn(),
   },
+  phoneOtp: {
+    findFirst: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    count: jest.fn(),
+  },
+  smsPackage: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  smsCredit: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  smsPurchase: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  smsLog: {
+    findMany: jest.fn(),
+    createMany: jest.fn(),
+    count: jest.fn(),
+  },
   $transaction: jest.fn((fn: any) => {
     if (typeof fn === 'function') return fn(createMockPrisma());
     return Promise.all(fn);

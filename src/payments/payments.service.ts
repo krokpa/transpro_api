@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   UnauthorizedException,
+  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -46,6 +47,7 @@ export class PaymentsService {
     });
 
     if (!booking) throw new NotFoundException('Réservation introuvable');
+    if (!booking.trip) throw new NotFoundException('Voyage introuvable (données incohérentes)');
     if (booking.passengerId !== passengerId) throw new BadRequestException('Accès refusé');
     // Vérifie le statut AVANT expiresAt : le cron peut avoir déjà annulé la réservation
     if (booking.status !== 'PENDING') throw new BadRequestException('Réservation déjà traitée');
@@ -117,21 +119,37 @@ export class PaymentsService {
     }
 
     // Créer l'enregistrement Payment seulement après confirmation de GeniusPay
-    await this.prisma.payment.create({
-      data: {
-        bookingId,
-        tenantId: booking.tenantId,
-        amount: booking.totalAmount,
-        currency: 'XOF',
-        method: 'GENIUS_PAY' as PaymentMethod,
-        status: 'PROCESSING',
-        transactionId,
-        commissionAmount,
-        netAmount,
-        providerRef: geniusRes.reference,
-        providerData: geniusRes as any,
-      },
-    });
+    try {
+      await this.prisma.payment.create({
+        data: {
+          bookingId,
+          tenantId: booking.tenantId,
+          amount: booking.totalAmount,
+          currency: 'XOF',
+          method: 'GENIUS_PAY' as PaymentMethod,
+          status: 'PROCESSING',
+          transactionId,
+          commissionAmount,
+          netAmount,
+          providerRef: geniusRes.reference,
+          providerData: geniusRes as any,
+        },
+      });
+    } catch (err: any) {
+      // P2002 = unique constraint → payment créé par une requête concurrente
+      if (err?.code === 'P2002') {
+        const existing = await this.prisma.payment.findUnique({ where: { bookingId } });
+        if (existing?.providerData) {
+          const data = existing.providerData as any;
+          if (data?.checkout_url) {
+            return { checkoutUrl: data.checkout_url, reference: existing.providerRef };
+          }
+        }
+        throw new BadRequestException('Paiement déjà en cours');
+      }
+      this.logger.error(`payment.create failed for booking ${bookingId}: ${err?.message}`, err?.stack);
+      throw new InternalServerErrorException('Erreur lors de l\'enregistrement du paiement');
+    }
 
     return { checkoutUrl: geniusRes.checkout_url, reference: geniusRes.reference };
   }
@@ -313,6 +331,74 @@ export class PaymentsService {
         status: 'OCCUPIED',
       });
     }
+  }
+
+  async confirmNative(bookingId: string, passengerId: string, geniusPayReference: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { payment: true },
+    });
+
+    if (!booking) throw new NotFoundException('Réservation introuvable');
+    if (booking.passengerId !== passengerId) throw new BadRequestException('Accès refusé');
+
+    // Idempotence : déjà confirmé (webhook arrivé avant la confirmation mobile)
+    if (booking.status === 'CONFIRMED') return { status: 'SUCCESS', updated: false };
+    if (booking.status !== 'PENDING')   throw new BadRequestException('Réservation non payable');
+
+    // Vérifier le paiement auprès de GeniusPay
+    let gpData: any;
+    try {
+      const res = await axios.get(`${GENIUSPAY_BASE}/payments/${geniusPayReference}`, {
+        headers: {
+          'X-API-Key':    this.config.get('GENIUSPAY_API_KEY'),
+          'X-API-Secret': this.config.get('GENIUSPAY_API_SECRET'),
+        },
+      });
+      gpData = res.data?.data ?? res.data;
+    } catch (err: any) {
+      this.logger.error(`GeniusPay verify failed for ref ${geniusPayReference}: ${err?.message}`);
+      throw new BadRequestException('Impossible de vérifier le paiement auprès de GeniusPay');
+    }
+
+    const gpStatus = (gpData?.status ?? '').toLowerCase();
+    if (gpStatus !== 'completed' && gpStatus !== 'success' && gpStatus !== 'paid') {
+      throw new BadRequestException(`Paiement non complété (statut: ${gpStatus})`);
+    }
+
+    const commissionAmount = Math.round(booking.totalAmount * COMMISSION_RATE);
+    const netAmount        = booking.totalAmount - commissionAmount;
+    const paymentChannel   = this._extractChannel(gpData);
+
+    // Créer ou mettre à jour le Payment en DB
+    let paymentId: string;
+    if (booking.payment) {
+      // Le webhook est déjà passé — utiliser le paiement existant
+      paymentId = booking.payment.id;
+      if (booking.payment.status === 'SUCCESS') {
+        return { status: 'SUCCESS', updated: false };
+      }
+    } else {
+      const payment = await this.prisma.payment.create({
+        data: {
+          bookingId,
+          tenantId:        booking.tenantId,
+          amount:          booking.totalAmount,
+          currency:        'XOF',
+          method:          'GENIUS_PAY' as any,
+          status:          'PROCESSING',
+          transactionId:   generateReference('PAY'),
+          commissionAmount,
+          netAmount,
+          providerRef:     geniusPayReference,
+          providerData:    gpData,
+        },
+      });
+      paymentId = payment.id;
+    }
+
+    await this.confirmPayment(bookingId, paymentId, paymentChannel, gpData);
+    return { status: 'SUCCESS', updated: true };
   }
 
   async confirmFromRedirect(bookingId: string, passengerId: string) {

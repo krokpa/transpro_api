@@ -2,6 +2,12 @@ import {
   Controller, Get, Post, Body, Param, UseGuards, HttpCode, HttpStatus,
   Headers, Patch, Req,
 } from '@nestjs/common';
+import { IsNotEmpty, IsString } from 'class-validator';
+
+class ConfirmNativeDto {
+  @IsString() @IsNotEmpty()
+  geniusPayReference: string;
+}
 import { FastifyRequest } from 'fastify';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
@@ -55,12 +61,24 @@ export class PaymentsController {
 
   @Post('bookings/:bookingId/pay')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Initier le paiement via Genius Pay' })
+  @ApiOperation({ summary: 'Initier le paiement via Genius Pay (legacy WebView)' })
   initiate(
     @Param('bookingId') bookingId: string,
     @CurrentUser('id') userId: string,
   ) {
     return this.payments.initiate(bookingId, userId);
+  }
+
+  @Post('bookings/:bookingId/confirm-native')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirmer un paiement effectué via le SDK natif GeniusPay' })
+  confirmNative(
+    @Param('bookingId') bookingId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: ConfirmNativeDto,
+  ) {
+    return this.payments.confirmNative(bookingId, userId, dto.geniusPayReference);
   }
 
   @Public()

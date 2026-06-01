@@ -15,13 +15,6 @@ async function bootstrap() {
     logger: process.env.NODE_ENV !== 'production',
     bodyLimit: 5 * 1024 * 1024, // 5 MB — accommodate base64-encoded logos
   });
-  // Expose rawBody pour la vérification de signature webhook (remplace le parser JSON par défaut)
-  adapter.getInstance().addHook('preValidation', async (req: any) => {
-    if (req.headers['content-type']?.includes('application/json') && typeof req.body === 'object') {
-      try { (req as any).rawBody = JSON.stringify(req.body); } catch {}
-    }
-  });
-
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter);
 
   const config = app.get(ConfigService);
@@ -71,6 +64,28 @@ async function bootstrap() {
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('docs', app, document);
   }
+
+  // Remplace le parser JSON de NestJS/Fastify pour accepter les bodies vides
+  // (ex: POST sans payload — Dio envoie Content-Type: application/json sans body).
+  // Doit être fait après app.init() qui est déclenché par app.listen().
+  await app.init();
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.removeContentTypeParser('application/json');
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (req: any, body: string, done: any) => {
+      if (!body || body.trim() === '') { done(null, {}); return; }
+      try {
+        const parsed = JSON.parse(body);
+        (req as any).rawBody = body; // pour la vérification de signature webhook
+        done(null, parsed);
+      } catch (err: any) {
+        err.statusCode = 400;
+        done(err, undefined);
+      }
+    },
+  );
 
   const port = config.get<number>('API_PORT', 3001);
   await app.listen(port, '0.0.0.0');

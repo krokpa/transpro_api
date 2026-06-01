@@ -21,6 +21,8 @@ module.exports = {
     '^@transpro/shared$': path.join(monorepoRoot, 'packages/shared/src'),
     // @transpro/database → mock léger pour tests unitaires (évite d'instancier PrismaClient)
     '^@transpro/database$': '<rootDir>/common/test/mock-database.ts',
+    // otplib a des dépendances ESM pures (@scure/base) incompatibles avec Jest CommonJS
+    '^otplib$': '<rootDir>/common/test/__mocks__/otplib.ts',
   },
   coverageThreshold: {
     global: { branches: 60, functions: 70, lines: 70, statements: 70 },

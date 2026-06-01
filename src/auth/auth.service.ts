@@ -12,6 +12,7 @@ import * as crypto from 'crypto';
 import { generateSecret, generateSync, verifySync, generateURI } from 'otplib';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { OtpService } from '../otp/otp.service';
 import { RegisterDto, LoginDto } from './dto/register.dto';
 import { JwtPayload, AuthTokens, PERM, SYSTEM_PROFILES, UserRole } from '@transpro/shared';
 import { nanoid } from 'nanoid';
@@ -23,9 +24,16 @@ export class AuthService {
     private jwt: JwtService,
     private config: ConfigService,
     private email: EmailService,
+    private otpService: OtpService,
   ) {}
 
   async register(dto: RegisterDto) {
+    // Valider le token de vérification téléphone
+    const verifiedPhone = await this.otpService.validateToken(dto.phoneVerificationToken);
+    if (verifiedPhone !== dto.phone) {
+      throw new BadRequestException('Le numéro de téléphone ne correspond pas au code OTP vérifié.');
+    }
+
     const existing = await this.prisma.user.findFirst({
       where: { OR: [{ email: dto.email }, { phone: dto.phone }] },
     });
@@ -43,6 +51,7 @@ export class AuthService {
         lastName: dto.lastName,
         passwordHash,
         role: dto.role ?? 'PASSENGER',
+        isVerified: true,
       },
       select: {
         id: true,
@@ -315,6 +324,7 @@ export class AuthService {
         isActive: true,
         isVerified: true,
         preferredLang: true,
+        avatar: true,
         createdAt: true,
         tenant: {
           select: {
