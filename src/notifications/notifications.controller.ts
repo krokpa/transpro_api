@@ -1,8 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
-  Patch,
   Param,
+  Patch,
+  Put,
   Query,
   UseGuards,
   HttpCode,
@@ -12,7 +14,10 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger'
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { UserRole } from '@transpro/shared';
+import { UpsertCampaignConfigDto } from './dto/campaign-config.dto';
 
 @ApiTags('Notifications')
 @Controller({ path: 'notifications', version: '1' })
@@ -49,5 +54,31 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Marquer toutes les notifications comme lues' })
   markAllAsRead(@CurrentUser('id') userId: string) {
     return this.notificationsService.markAllAsRead(userId);
+  }
+
+  // ── Campaign config ──────────────────────────────────────────────────────────
+
+  @Get('campaigns/config')
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
+  @ApiOperation({ summary: 'Récupérer la config campagnes de ma compagnie' })
+  getCampaignConfig(@CurrentUser('id') userId: string) {
+    return this.notificationsService.getCampaignConfigByUserId(userId);
+  }
+
+  @Put('campaigns/config')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
+  @ApiOperation({ summary: 'Mettre à jour la config campagnes de ma compagnie' })
+  upsertCampaignConfig(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpsertCampaignConfigDto,
+  ) {
+    return this.notificationsService.upsertCampaignConfig(userId, dto);
+  }
+
+  @Get('campaigns/config/tenant/:tenantId')
+  @ApiOperation({ summary: 'Config campagnes publique d\'une compagnie (passagers)' })
+  getPublicCampaignConfig(@Param('tenantId') tenantId: string) {
+    return this.notificationsService.getCampaignConfig(tenantId);
   }
 }

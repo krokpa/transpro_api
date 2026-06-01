@@ -6,6 +6,7 @@ import { RealtimeService } from '../../realtime/realtime.service';
 import { PushService } from '../../push/push.service';
 import { createMockPrisma } from '../../common/test/mock-prisma';
 import { NotificationType } from '@transpro/shared';
+import { DEFAULT_CAMPAIGN_CONFIG } from '../dto/campaign-config.dto';
 
 const mockPrisma  = createMockPrisma();
 const mockRealtime = { sendToUser: jest.fn(), broadcastToTrip: jest.fn(), broadcastToCompany: jest.fn() };
@@ -250,6 +251,113 @@ describe('NotificationsService', () => {
       const result = await service.getUnreadCount('user-fr');
 
       expect(result.count).toBe(5);
+    });
+  });
+
+  // ── getCampaignConfig ─────────────────────────────────────────────────────────
+
+  describe('getCampaignConfig', () => {
+    it('should return defaults when tenant settings has no campaignConfig', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ settings: {} });
+
+      const result = await service.getCampaignConfig('tenant-1');
+
+      expect(result).toEqual(DEFAULT_CAMPAIGN_CONFIG);
+    });
+
+    it('should merge stored config over defaults', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        settings: {
+          campaignConfig: { morningReminderEnabled: true, morningReminderHour: 8 },
+        },
+      });
+
+      const result = await service.getCampaignConfig('tenant-1');
+
+      expect(result.morningReminderEnabled).toBe(true);
+      expect(result.morningReminderHour).toBe(8);
+      expect(result.weekendOfferEnabled).toBe(false);
+    });
+
+    it('should throw NotFoundException when tenant does not exist', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue(null);
+
+      await expect(service.getCampaignConfig('unknown')).rejects.toThrow(NotFoundException);
+    });
+
+    it('should return defaults when tenant settings is null', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ settings: null });
+
+      const result = await service.getCampaignConfig('tenant-1');
+
+      expect(result).toEqual(DEFAULT_CAMPAIGN_CONFIG);
+    });
+  });
+
+  // ── getCampaignConfigByUserId ─────────────────────────────────────────────────
+
+  describe('getCampaignConfigByUserId', () => {
+    it('should resolve tenantId from user and return config', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ tenantId: 'tenant-1' });
+      mockPrisma.tenant.findUnique.mockResolvedValue({ settings: {} });
+
+      const result = await service.getCampaignConfigByUserId('user-fr');
+
+      expect(result).toEqual(DEFAULT_CAMPAIGN_CONFIG);
+    });
+
+    it('should throw NotFoundException when user has no tenant', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ tenantId: null });
+
+      await expect(service.getCampaignConfigByUserId('passenger')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── upsertCampaignConfig ──────────────────────────────────────────────────────
+
+  describe('upsertCampaignConfig', () => {
+    it('should merge dto over existing config and persist it', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ tenantId: 'tenant-1' });
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        settings: {
+          campaignConfig: { morningReminderEnabled: false },
+          anotherKey: 'preserved',
+        },
+      });
+      mockPrisma.tenant.update.mockResolvedValue({});
+
+      const result = await service.upsertCampaignConfig('user-fr', {
+        morningReminderEnabled: true,
+        morningReminderHour: 9,
+      });
+
+      expect(result.morningReminderEnabled).toBe(true);
+      expect(result.morningReminderHour).toBe(9);
+
+      const updateCall = (mockPrisma.tenant.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.settings.anotherKey).toBe('preserved');
+      expect(updateCall.data.settings.campaignConfig.morningReminderEnabled).toBe(true);
+    });
+
+    it('should create campaignConfig from defaults when none exists', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ tenantId: 'tenant-1' });
+      mockPrisma.tenant.findUnique.mockResolvedValue({ settings: {} });
+      mockPrisma.tenant.update.mockResolvedValue({});
+
+      const result = await service.upsertCampaignConfig('user-fr', {
+        weekendOfferEnabled: true,
+      });
+
+      expect(result.weekendOfferEnabled).toBe(true);
+      expect(result.morningReminderEnabled).toBe(false);
+    });
+
+    it('should throw NotFoundException when user has no tenant', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ tenantId: null });
+
+      await expect(
+        service.upsertCampaignConfig('passenger', { morningReminderEnabled: true }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });
