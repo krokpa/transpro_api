@@ -19,6 +19,7 @@ import {
   ParcelFiltersDto,
   UpdateParcelStatusDto,
 } from './dto/parcel.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -28,7 +29,8 @@ import { UserRole, TenantPlan } from '@transpro/shared';
 
 @ApiTags('Parcels')
 @ApiBearerAuth()
-@Controller('parcels')
+@UseGuards(JwtAuthGuard)
+@Controller({ path: 'parcels', version: '1' })
 export class ParcelsController {
   constructor(private readonly parcels: ParcelsService) {}
 

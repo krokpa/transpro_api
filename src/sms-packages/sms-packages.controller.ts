@@ -2,7 +2,8 @@ import {
   Controller, Get, Post, Patch, Delete, Body, Param, Query,
   UseGuards, HttpCode, Headers, RawBodyRequest, Req,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { FastifyRequest } from 'fastify';
+import { UserRole } from '@transpro/shared';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -25,21 +26,21 @@ export class SmsPackagesController {
 
   @Get('all')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('SUPER_ADMIN')
+  @Roles(UserRole.SUPER_ADMIN)
   listAll() {
     return this.svc.listPackages(false);
   }
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('SUPER_ADMIN')
+  @Roles(UserRole.SUPER_ADMIN)
   create(@Body() dto: CreateSmsPackageDto) {
     return this.svc.createPackage(dto);
   }
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('SUPER_ADMIN')
+  @Roles(UserRole.SUPER_ADMIN)
   update(@Param('id') id: string, @Body() dto: UpdateSmsPackageDto) {
     return this.svc.updatePackage(id, dto);
   }
@@ -47,7 +48,7 @@ export class SmsPackagesController {
   @Delete(':id')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('SUPER_ADMIN')
+  @Roles(UserRole.SUPER_ADMIN)
   remove(@Param('id') id: string) {
     return this.svc.deletePackage(id);
   }
@@ -74,7 +75,7 @@ export class SmsPackagesController {
 
   @Post('purchase')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('COMPANY_OWNER')
+  @Roles(UserRole.COMPANY_OWNER)
   purchase(@CurrentUser() user: any, @Body() dto: PurchaseSmsPackageDto) {
     return this.svc.initiatePurchase(user.tenantId, dto);
   }
@@ -90,7 +91,7 @@ export class SmsPackagesController {
   @Post('webhook')
   @HttpCode(200)
   webhook(
-    @Req() req: RawBodyRequest<Request>,
+    @Req() req: RawBodyRequest<FastifyRequest>,
     @Headers('x-genius-signature') sig: string,
     @Headers('x-genius-timestamp') ts: string,
   ) {

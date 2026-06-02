@@ -323,6 +323,7 @@ export class AuthService {
         tenantId: true,
         isActive: true,
         isVerified: true,
+        totpEnabled: true,
         preferredLang: true,
         avatar: true,
         createdAt: true,

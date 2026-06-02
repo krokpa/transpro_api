@@ -15,8 +15,8 @@ import { UserRole, TenantPlan } from '@transpro/shared';
 
 @ApiTags('Bagages')
 @ApiBearerAuth()
-@Controller('luggage')
-@UseGuards(PlanGuard)
+@Controller({ path: 'luggage', version: '1' })
+@UseGuards(JwtAuthGuard, PlanGuard)
 @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
 export class LuggageController {
   constructor(private readonly svc: LuggageService) {}
