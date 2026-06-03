@@ -78,6 +78,12 @@ export class ParcelsController {
     return this.parcels.findByRecipient(user.id, user.phone ?? '');
   }
 
+  @Get('my/:id')
+  @ApiOperation({ summary: 'Passager — détail d\'un colis (expéditeur ou destinataire)' })
+  findMyOne(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.parcels.findByIdForPassenger(id, user.id, user.phone ?? '');
+  }
+
   // ── Agent / Admin / Owner routes ──────────────────────────────────────────────
 
   @Post()

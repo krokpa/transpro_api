@@ -274,6 +274,24 @@ export class ParcelsService {
     });
   }
 
+  // ── Find one parcel for a passenger (sender OR recipient) ────────────────
+
+  async findByIdForPassenger(id: string, userId: string, phone: string) {
+    const parcel = await this.prisma.parcel.findFirst({
+      where: {
+        id,
+        OR: [
+          { senderId: userId },
+          { recipientId: userId },
+          { recipientPhone: phone },
+        ],
+      },
+      select: PARCEL_SELECT,
+    });
+    if (!parcel) throw new NotFoundException('Colis introuvable');
+    return parcel;
+  }
+
   // ── Find by recipient (passenger) ─────────────────────────────────────────
   // Matches parcels where the authenticated user is the recipient —
   // either by recipientId (registered) or by recipientPhone (unregistered at time of send).
