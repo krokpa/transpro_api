@@ -50,6 +50,19 @@ export class LoginDto {
   password: string;
 }
 
+export class LoginByPhoneDto {
+  @ApiProperty({ example: '+2250712345678' })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^\+\d{10,15}$/, { message: 'Format international requis : +225XXXXXXXXXX' })
+  phone: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Le code OTP doit être à 6 chiffres' })
+  code: string;
+}
+
 export class RefreshTokenDto {
   @ApiProperty()
   @IsString()

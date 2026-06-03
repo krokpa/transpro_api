@@ -13,7 +13,7 @@ import { generateSecret, generateSync, verifySync, generateURI } from 'otplib';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { OtpService } from '../otp/otp.service';
-import { RegisterDto, LoginDto } from './dto/register.dto';
+import { RegisterDto, LoginDto, LoginByPhoneDto } from './dto/register.dto';
 import { JwtPayload, AuthTokens, PERM, SYSTEM_PROFILES, UserRole } from '@transpro/shared';
 import { nanoid } from 'nanoid';
 
@@ -107,6 +107,44 @@ export class AuthService {
     const { passwordHash: _, ...userWithoutPassword } = user;
     const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined);
     return { user: userWithoutPassword, ...tokens };
+  }
+
+  async checkPhoneExists(phone: string): Promise<{ exists: boolean }> {
+    const user = await this.prisma.user.findUnique({
+      where:  { phone },
+      select: { id: true },
+    });
+    return { exists: !!user };
+  }
+
+  async loginByPhone(dto: LoginByPhoneDto) {
+    // Vérifie l'OTP (rate-limit, attempts, expiry, marks as used)
+    await this.otpService.verify(dto.phone, dto.code);
+
+    const user = await this.prisma.user.findUnique({
+      where: { phone: dto.phone },
+      include: {
+        userStations: {
+          where: { station: { isActive: true } },
+          include: { station: { select: { id: true, name: true, code: true, isActive: true, city: { select: { name: true } } } } },
+          orderBy: { isPrimary: 'desc' },
+        },
+      },
+    });
+
+    // Message générique — ne pas révéler si le numéro est enregistré
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Impossible de se connecter avec ce numéro');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
+    const { passwordHash: _, totpSecret: __, totpBackupCodes: ___, ...userWithoutSecrets } = user;
+    const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined);
+    return { user: userWithoutSecrets, ...tokens };
   }
 
   async verifyTotpLogin(twoFactorToken: string, code: string) {
