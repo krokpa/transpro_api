@@ -187,6 +187,26 @@ export class BookingsService {
     return { seatNumbers, seatIds };
   }
 
+  /** Retourne (ou crée une seule fois) le compte passager générique partagé d'un tenant. */
+  private async getOrCreateGuestPassenger(tenant: { id: string; slug: string }): Promise<any> {
+    const guestEmail = `guichet@${tenant.slug}.transpro.ci`;
+    const guestPhone = `+000${tenant.id.replace(/-/g, '').slice(0, 12)}`;
+
+    return this.prisma.user.upsert({
+      where:  { email: guestEmail },
+      update: {},
+      create: {
+        email:        guestEmail,
+        phone:        guestPhone,
+        firstName:    'Client',
+        lastName:     'Guichet',
+        passwordHash: crypto.randomBytes(32).toString('hex'),
+        role:         'PASSENGER',
+        isVerified:   true,
+      },
+    });
+  }
+
   /** Occupe des sièges directement (vente guichet → OCCUPIED sans lock intermédiaire). */
   private async occupySeats(
     tx: any,
@@ -435,22 +455,28 @@ export class BookingsService {
       : null;
 
     if (!passenger) {
-      // Mot de passe fort aléatoire (64 chars hex) — le client guichet est anonyme
-      const strongPwd   = crypto.randomBytes(32).toString('hex');
-      const passwordHash = await bcrypt.hash(strongPwd, 12);
-      const phone = dto.phone ?? `+000${generateReference('').replace(/-/g, '')}`;
-      const email = dto.email ?? `${phone.replace(/\D/g, '')}_${Date.now()}@guichet.transpro.ci`;
-      passenger = await this.prisma.user.create({
-        data: {
-          email,
-          phone,
-          firstName: dto.firstName ?? 'Client',
-          lastName: dto.lastName ?? 'Anonyme',
-          passwordHash,
-          role: 'PASSENGER',
-          isVerified: true,
-        },
-      });
+      if (dto.phone) {
+        // Téléphone fourni mais inconnu → compte lié à ce numéro
+        const strongPwd    = crypto.randomBytes(32).toString('hex');
+        const passwordHash = await bcrypt.hash(strongPwd, 12);
+        const email        = `${dto.phone.replace(/\D/g, '')}@guichet.transpro.ci`;
+        passenger = await this.prisma.user.upsert({
+          where:  { email },
+          update: {},
+          create: {
+            email,
+            phone: dto.phone,
+            firstName:    dto.firstName ?? 'Client',
+            lastName:     dto.lastName  ?? 'Anonyme',
+            passwordHash,
+            role:         'PASSENGER',
+            isVerified:   true,
+          },
+        });
+      } else {
+        // Pas de téléphone → compte générique partagé de la compagnie (1 seul par tenant)
+        passenger = await this.getOrCreateGuestPassenger(trip.tenant as any);
+      }
     }
 
     const bookingRef     = generateReference('TP');

@@ -305,7 +305,7 @@ describe('BookingsService', () => {
     const mockGuichetTrip = {
       ...mockTrip,
       route: { name: 'Abidjan → Bouaké', originCity: { name: 'Abidjan' }, destinationCity: { name: 'Bouaké' } },
-      tenant: { name: 'Transport Express CI', logo: LOGO_URL },
+      tenant: { id: 'tenant-1', slug: 'transport-express-ci', name: 'Transport Express CI', logo: LOGO_URL },
       seats: [mockAvailableSeat('1A'), mockAvailableSeat('1B')],
       vehicle: { advancedSeatManagement: true },
     };
@@ -341,11 +341,10 @@ describe('BookingsService', () => {
       );
     });
 
-    it('should create a new anonymous passenger when phone not found', async () => {
+    it('should use shared guest account when no phone provided', async () => {
       mockPrisma.trip.findFirst.mockResolvedValue(mockGuichetTrip);
       mockPrisma.tripSeat.findMany.mockResolvedValue([mockAvailableSeat('1A')]);
-      mockPrisma.user.findFirst.mockResolvedValue(null);
-      mockPrisma.user.create.mockResolvedValue({ id: 'new-passenger-1' });
+      mockPrisma.user.upsert.mockResolvedValue({ id: 'guest-passenger-1' });
       mockPrisma.$transaction.mockResolvedValue(mockCreatedBooking);
       mockPrisma.booking.findUnique.mockResolvedValue(mockFinalBooking);
 
@@ -354,7 +353,11 @@ describe('BookingsService', () => {
         seatNumbers: ['1A'],
       });
 
-      expect(mockPrisma.user.create).toHaveBeenCalled();
+      expect(mockPrisma.user.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { email: 'guichet@transport-express-ci.transpro.ci' },
+        }),
+      );
     });
 
     it('should throw NotFoundException when trip not found', async () => {
@@ -382,7 +385,7 @@ describe('BookingsService', () => {
       };
       mockPrisma.trip.findFirst.mockResolvedValue(simpleTrip);
       mockPrisma.user.findFirst.mockResolvedValue(null);
-      mockPrisma.user.create.mockResolvedValue({ id: 'p1' });
+      mockPrisma.user.upsert.mockResolvedValue({ id: 'p1' });
       mockPrisma.$transaction.mockResolvedValue(mockCreatedBooking);
       mockPrisma.booking.findUnique.mockResolvedValue(mockFinalBooking);
 
