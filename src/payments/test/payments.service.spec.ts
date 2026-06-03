@@ -5,6 +5,7 @@ import { PaymentsService } from '../payments.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { PushService } from '../../push/push.service';
 import { createMockPrisma } from '../../common/test/mock-prisma';
 import { COMMISSION_RATE, NotificationType } from '@transpro/shared';
 
@@ -23,6 +24,10 @@ jest.mock('axios');
 const mockPrisma        = createMockPrisma();
 const mockRealtime      = { broadcastToTrip: jest.fn(), broadcastToCompany: jest.fn(), sendToUser: jest.fn() };
 const mockNotifications = { create: jest.fn().mockResolvedValue({}) };
+const mockPush          = {
+  sendToUser: jest.fn().mockResolvedValue(undefined),
+  sendWebPushToTenant: jest.fn().mockResolvedValue(undefined),
+};
 
 const LOGO_URL = 'https://example.com/logo.png';
 
@@ -59,9 +64,10 @@ describe('PaymentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
-        { provide: PrismaService,       useValue: mockPrisma        },
-        { provide: RealtimeService,     useValue: mockRealtime      },
+        { provide: PrismaService,        useValue: mockPrisma        },
+        { provide: RealtimeService,      useValue: mockRealtime      },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: PushService,          useValue: mockPush          },
         {
           provide: ConfigService,
           useValue: {

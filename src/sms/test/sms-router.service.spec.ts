@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SmsRouterService } from '../sms-router.service';
+import { OrangeSmsService } from '../orange-sms.service';
 import { MtnSmsService } from '../mtn-sms.service';
 import { SmsService } from '../sms.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -21,19 +22,22 @@ const makeCredit = (overrides: Partial<any> = {}) => ({
 
 describe('SmsRouterService', () => {
   let service: SmsRouterService;
-  let mockMtn: jest.Mocked<Pick<MtnSmsService, 'send' | 'isEnabled'>>;
-  let mockAt: jest.Mocked<Pick<SmsService, 'send'>>;
+  let mockOrange: jest.Mocked<Pick<OrangeSmsService, 'send' | 'isEnabled'>>;
+  let mockMtn:    jest.Mocked<Pick<MtnSmsService,    'send' | 'isEnabled'>>;
+  let mockAt:     jest.Mocked<Pick<SmsService,        'send'>>;
 
   beforeEach(async () => {
-    mockMtn = { send: jest.fn(), isEnabled: true } as any;
-    mockAt  = { send: jest.fn() } as any;
+    mockOrange = { send: jest.fn(), isEnabled: true } as any;
+    mockMtn    = { send: jest.fn(), isEnabled: true } as any;
+    mockAt     = { send: jest.fn() } as any;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SmsRouterService,
-        { provide: MtnSmsService,  useValue: mockMtn },
-        { provide: SmsService,     useValue: mockAt },
-        { provide: PrismaService,  useValue: mockPrisma },
+        { provide: OrangeSmsService, useValue: mockOrange },
+        { provide: MtnSmsService,    useValue: mockMtn },
+        { provide: SmsService,       useValue: mockAt },
+        { provide: PrismaService,    useValue: mockPrisma },
       ],
     }).compile();
 
@@ -42,75 +46,124 @@ describe('SmsRouterService', () => {
     mockPrisma.smsLog.createMany.mockResolvedValue({ count: 1 });
   });
 
-  // ── send (système) ────────────────────────────────────────────────────────
+  // ── send (système) ─────────────────────────────────────────────────────────
 
   describe('send', () => {
-    it('achemine vers MTN si activé et réussi', async () => {
-      mockMtn.send.mockResolvedValue(true);
+    it('achemine vers Orange si activé et réussi', async () => {
+      mockOrange.send.mockResolvedValue(true);
 
       await service.send(PHONE, 'Code: 123456');
 
-      expect(mockMtn.send).toHaveBeenCalledWith(PHONE, 'Code: 123456', undefined);
+      expect(mockOrange.send).toHaveBeenCalledWith(PHONE, 'Code: 123456', undefined);
+      expect(mockMtn.send).not.toHaveBeenCalled();
       expect(mockAt.send).not.toHaveBeenCalled();
       expect(mockPrisma.smsLog.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.arrayContaining([expect.objectContaining({ provider: 'MTN' })]) }),
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ provider: 'ORANGE' }),
+          ]),
+        }),
       );
     });
 
-    it('bascule vers Africa\'s Talking si MTN échoue', async () => {
+    it('bascule vers MTN si Orange échoue', async () => {
+      mockOrange.send.mockResolvedValue(false);
+      mockMtn.send.mockResolvedValue(true);
+
+      await service.send(PHONE, 'Fallback MTN');
+
+      expect(mockOrange.send).toHaveBeenCalledTimes(1);
+      expect(mockMtn.send).toHaveBeenCalledWith(PHONE, 'Fallback MTN', undefined);
+      expect(mockAt.send).not.toHaveBeenCalled();
+      expect(mockPrisma.smsLog.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ provider: 'MTN' }),
+          ]),
+        }),
+      );
+    });
+
+    it("bascule vers Africa's Talking si Orange et MTN échouent", async () => {
+      mockOrange.send.mockResolvedValue(false);
       mockMtn.send.mockResolvedValue(false);
       mockAt.send.mockResolvedValue(undefined);
 
-      await service.send(PHONE, 'Fallback test');
+      await service.send(PHONE, 'Fallback AT');
 
-      expect(mockAt.send).toHaveBeenCalledWith(PHONE, 'Fallback test');
+      expect(mockAt.send).toHaveBeenCalledWith(PHONE, 'Fallback AT');
       expect(mockPrisma.smsLog.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.arrayContaining([expect.objectContaining({ provider: 'AFRICASTALKING' })]) }),
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ provider: 'AFRICASTALKING' }),
+          ]),
+        }),
       );
     });
 
-    it('utilise le mock (log uniquement) si MTN et AT échouent tous les deux', async () => {
+    it('utilise le mock si tous les providers échouent', async () => {
+      mockOrange.send.mockResolvedValue(false);
       mockMtn.send.mockResolvedValue(false);
       mockAt.send.mockRejectedValue(new Error('AT down'));
 
       await expect(service.send(PHONE, 'Mock fallback')).resolves.not.toThrow();
 
       expect(mockPrisma.smsLog.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.arrayContaining([expect.objectContaining({ provider: 'MOCK' })]) }),
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ provider: 'MOCK' }),
+          ]),
+        }),
       );
     });
 
-    it('ignore MTN si désactivé et passe directement à AT', async () => {
-      Object.defineProperty(mockMtn, 'isEnabled', { get: () => false });
+    it('ignore Orange si désactivé et essaie MTN directement', async () => {
+      Object.defineProperty(mockOrange, 'isEnabled', { get: () => false });
+      mockMtn.send.mockResolvedValue(true);
+
+      await service.send(PHONE, 'Direct MTN');
+
+      expect(mockOrange.send).not.toHaveBeenCalled();
+      expect(mockMtn.send).toHaveBeenCalled();
+    });
+
+    it('ignore Orange et MTN si tous deux désactivés et passe à AT', async () => {
+      Object.defineProperty(mockOrange, 'isEnabled', { get: () => false });
+      Object.defineProperty(mockMtn,    'isEnabled', { get: () => false });
       mockAt.send.mockResolvedValue(undefined);
 
       await service.send(PHONE, 'Direct AT');
 
+      expect(mockOrange.send).not.toHaveBeenCalled();
       expect(mockMtn.send).not.toHaveBeenCalled();
       expect(mockAt.send).toHaveBeenCalled();
     });
 
     it('log le SMS avec le bon sender', async () => {
-      mockMtn.send.mockResolvedValue(true);
+      mockOrange.send.mockResolvedValue(true);
 
       await service.send(PHONE, 'Test', 'MON-SENDER');
 
       expect(mockPrisma.smsLog.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.arrayContaining([expect.objectContaining({ sender: 'MON-SENDER' })]) }),
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ sender: 'MON-SENDER' }),
+          ]),
+        }),
       );
     });
   });
 
-  // ── sendForTenant ─────────────────────────────────────────────────────────
+  // ── sendForTenant ──────────────────────────────────────────────────────────
 
   describe('sendForTenant', () => {
-    it('lève une erreur si le tenant n\'a pas de crédits', async () => {
+    it("lève une erreur si le tenant n'a pas de crédits", async () => {
       mockPrisma.smsCredit.findFirst.mockResolvedValue(null);
 
       await expect(service.sendForTenant(TENANT, PHONE, 'Hello')).rejects.toThrow(
         'Crédits SMS insuffisants',
       );
-      expect(mockMtn.send).not.toHaveBeenCalled();
+      expect(mockOrange.send).not.toHaveBeenCalled();
     });
 
     it('lève une erreur si les crédits sont insuffisants', async () => {
@@ -121,44 +174,48 @@ describe('SmsRouterService', () => {
       );
     });
 
-    it('envoie le SMS et décrémente les crédits', async () => {
+    it('envoie via Orange et décrémente les crédits', async () => {
       mockPrisma.smsCredit.findFirst.mockResolvedValue(makeCredit({ remaining: 50 }));
       mockPrisma.smsCredit.update.mockResolvedValue({} as any);
-      mockMtn.send.mockResolvedValue(true);
+      mockOrange.send.mockResolvedValue(true);
 
       await service.sendForTenant(TENANT, PHONE, 'Votre commande est confirmée');
 
-      expect(mockMtn.send).toHaveBeenCalledTimes(1);
+      expect(mockOrange.send).toHaveBeenCalledTimes(1);
       expect(mockPrisma.smsCredit.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { remaining: { decrement: 1 } } }),
       );
     });
 
     it('utilise le customSender du crédit si disponible', async () => {
-      mockPrisma.smsCredit.findFirst.mockResolvedValue(makeCredit({ remaining: 10, customSender: 'TRANSIT-CI' }));
+      mockPrisma.smsCredit.findFirst.mockResolvedValue(
+        makeCredit({ remaining: 10, customSender: 'TRANSIT-CI' }),
+      );
       mockPrisma.smsCredit.update.mockResolvedValue({} as any);
-      mockMtn.send.mockResolvedValue(true);
+      mockOrange.send.mockResolvedValue(true);
 
       await service.sendForTenant(TENANT, PHONE, 'Message');
 
-      expect(mockMtn.send).toHaveBeenCalledWith(PHONE, 'Message', 'TRANSIT-CI');
+      expect(mockOrange.send).toHaveBeenCalledWith(PHONE, 'Message', 'TRANSIT-CI');
     });
 
     it('utilise TRANSPRO-CI comme sender si aucun customSender', async () => {
-      mockPrisma.smsCredit.findFirst.mockResolvedValue(makeCredit({ remaining: 10, customSender: null }));
+      mockPrisma.smsCredit.findFirst.mockResolvedValue(
+        makeCredit({ remaining: 10, customSender: null }),
+      );
       mockPrisma.smsCredit.update.mockResolvedValue({} as any);
-      mockMtn.send.mockResolvedValue(true);
+      mockOrange.send.mockResolvedValue(true);
 
       await service.sendForTenant(TENANT, PHONE, 'Message');
 
-      expect(mockMtn.send).toHaveBeenCalledWith(PHONE, 'Message', 'TRANSPRO-CI');
+      expect(mockOrange.send).toHaveBeenCalledWith(PHONE, 'Message', 'TRANSPRO-CI');
     });
 
     it('décompte le bon nombre de crédits pour un envoi groupé', async () => {
       const recipients = ['+2250700000001', '+2250700000002', '+2250700000003'];
       mockPrisma.smsCredit.findFirst.mockResolvedValue(makeCredit({ remaining: 50 }));
       mockPrisma.smsCredit.update.mockResolvedValue({} as any);
-      mockMtn.send.mockResolvedValue(true);
+      mockOrange.send.mockResolvedValue(true);
 
       await service.sendForTenant(TENANT, recipients, 'Bulk message');
 

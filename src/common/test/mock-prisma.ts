@@ -201,10 +201,20 @@ export const createMockPrisma = () => ({
     create: jest.fn(),
     update: jest.fn(),
   },
+  closureDay: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    delete: jest.fn(),
+  },
   smsLog: {
     findMany: jest.fn(),
+    findFirst: jest.fn(),
+    create: jest.fn(),
     createMany: jest.fn(),
     count: jest.fn(),
+    groupBy: jest.fn(),
+    aggregate: jest.fn(),
   },
   $transaction: jest.fn((fn: any) => {
     if (typeof fn === 'function') return fn(createMockPrisma());

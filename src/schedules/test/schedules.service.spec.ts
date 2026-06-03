@@ -286,6 +286,11 @@ describe('SchedulesService', () => {
   // ── generateFromSchedule ──────────────────────────────────────────────────────
 
   describe('generateFromSchedule', () => {
+    beforeEach(() => {
+      // closureDay.findMany est appelé lors de la génération pour ignorer les jours fériés
+      mockPrisma.closureDay.findMany.mockResolvedValue([]);
+    });
+
     it('should throw NotFoundException when schedule does not exist', async () => {
       mockPrisma.schedule.findFirst.mockResolvedValue(null);
       await expect(service.generateFromSchedule(TENANT_ID, 'nonexistent')).rejects.toThrow(NotFoundException);

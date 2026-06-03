@@ -551,7 +551,16 @@ export class PaymentsService {
       include: {
         booking: {
           include: {
-            trip: { include: { route: true } },
+            trip: {
+              include: {
+                route: {
+                  include: {
+                    originCity:      true,
+                    destinationCity: true,
+                  },
+                },
+              },
+            },
             passenger: { select: { firstName: true, lastName: true, phone: true } },
           },
         },

@@ -45,7 +45,7 @@ export class TripsController {
   @ApiOperation({ summary: 'Lister les voyages de la compagnie' })
   findAll(
     @CurrentUser() currentUser: any,
-    @Query('status') status?: TripStatus,
+    @Query('status') status?: string,
     @Query('routeId') routeId?: string,
     @Query('date') date?: string,
     @Query('tripClass') tripClass?: string,

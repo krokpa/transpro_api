@@ -28,6 +28,7 @@ import { ParcelsModule } from './parcels/parcels.module';
 import { SmsModule } from './sms/sms.module';
 import { OtpModule } from './otp/otp.module';
 import { SmsPackagesModule } from './sms-packages/sms-packages.module';
+import { AdminSmsModule } from './admin-sms/admin-sms.module';
 import { LuggageModule } from './luggage/luggage.module';
 import { RefundsModule } from './refunds/refunds.module';
 import { PushModule } from './push/push.module';
@@ -79,6 +80,7 @@ import { PaymentRedirectController } from './payment-redirect.controller';
     SmsModule,
     OtpModule,
     SmsPackagesModule,
+    AdminSmsModule,
     LuggageModule,
     RefundsModule,
     PushModule,

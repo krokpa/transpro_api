@@ -4,6 +4,7 @@ import { TripsService } from '../trips.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { PushService } from '../../push/push.service';
 import { createMockPrisma } from '../../common/test/mock-prisma';
 import { NotificationType, TripStatus } from '@transpro/shared';
 
@@ -14,6 +15,10 @@ const mockRealtime = {
   sendToUser: jest.fn(),
 };
 const mockNotifications = { create: jest.fn().mockResolvedValue({}) };
+const mockPush          = {
+  sendToUser: jest.fn().mockResolvedValue(undefined),
+  sendWebPushToTenant: jest.fn().mockResolvedValue(undefined),
+};
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -76,9 +81,10 @@ describe('TripsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TripsService,
-        { provide: PrismaService,       useValue: mockPrisma        },
-        { provide: RealtimeService,     useValue: mockRealtime      },
+        { provide: PrismaService,        useValue: mockPrisma        },
+        { provide: RealtimeService,      useValue: mockRealtime      },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: PushService,          useValue: mockPush          },
       ],
     }).compile();
 
@@ -344,8 +350,8 @@ describe('TripsService', () => {
       mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'CANCELLED' });
       mockPrisma.trip.findUnique.mockResolvedValue(fullMockTrip);
       mockPrisma.booking.findMany.mockResolvedValue([
-        { id: 'b1', passengerId: 'u1' },
-        { id: 'b2', passengerId: 'u2' },
+        { id: 'b1', passengerId: 'u1', tripId: 'trip-1', seatNumbers: ['1A'] },
+        { id: 'b2', passengerId: 'u2', tripId: 'trip-1', seatNumbers: ['1B'] },
       ]);
 
       await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.CANCELLED });
@@ -382,7 +388,7 @@ describe('TripsService', () => {
       mockPrisma.trip.findFirst.mockResolvedValue(mockTrip);
       mockPrisma.trip.update.mockResolvedValue({ ...mockTrip, status: 'CANCELLED' });
       mockPrisma.trip.findUnique.mockResolvedValue(noLogoTrip);
-      mockPrisma.booking.findMany.mockResolvedValue([{ id: 'b1', passengerId: 'u1' }]);
+      mockPrisma.booking.findMany.mockResolvedValue([{ id: 'b1', passengerId: 'u1', tripId: 'trip-1', seatNumbers: ['1A'] }]);
 
       await service.updateStatus('trip-1', TENANT_ID, { status: TripStatus.CANCELLED });
 

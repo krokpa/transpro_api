@@ -72,10 +72,13 @@ export class TripsService {
     return trip;
   }
 
-  async findAll(tenantId: string, filters: { status?: TripStatus; routeId?: string; date?: string; tripClass?: string; stationId?: string | null }) {
+  async findAll(tenantId: string, filters: { status?: string; routeId?: string; date?: string; tripClass?: string; stationId?: string | null }) {
     const where: any = { tenantId };
 
-    if (filters.status) where.status = filters.status;
+    if (filters.status) {
+      const parts = filters.status.split(',').map((s) => s.trim()).filter(Boolean);
+      where.status = parts.length === 1 ? parts[0] : { in: parts };
+    }
     if (filters.routeId) where.routeId = filters.routeId;
     if (filters.tripClass) where.tripClass = filters.tripClass;
     if (filters.stationId) where.departureStationId = filters.stationId;
