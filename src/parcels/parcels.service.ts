@@ -274,6 +274,24 @@ export class ParcelsService {
     });
   }
 
+  // ── Find by recipient (passenger) ─────────────────────────────────────────
+  // Matches parcels where the authenticated user is the recipient —
+  // either by recipientId (registered) or by recipientPhone (unregistered at time of send).
+
+  async findByRecipient(userId: string, phone: string) {
+    return this.prisma.parcel.findMany({
+      where: {
+        OR: [
+          { recipientId: userId },
+          { recipientPhone: phone },
+        ],
+      },
+      select: PARCEL_SELECT,
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+
   // ── Find by trip ──────────────────────────────────────────────────────────
 
   async findByTrip(tripId: string, tenantId: string) {
