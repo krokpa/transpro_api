@@ -27,6 +27,16 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   avatar?: string;
+
+  @ApiPropertyOptional({ example: 'orange', enum: ['orange', 'blue', 'purple', 'green', 'rose', 'teal'] })
+  @IsOptional()
+  @IsString()
+  themeAccent?: string;
+
+  @ApiPropertyOptional({ example: 'navy', enum: ['navy', 'slate', 'charcoal'] })
+  @IsOptional()
+  @IsString()
+  themeSidebar?: string;
 }
 
 export class ChangePasswordDto {
@@ -86,4 +96,17 @@ export class UpdateRoleDto {
   @ApiProperty({ enum: [UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT] })
   @IsEnum(UserRole)
   role: UserRole;
+}
+
+export class SetCredentialsDto {
+  @ApiPropertyOptional({ example: 'krokpa@email.com', description: 'Nouvelle adresse email (remplace l\'adresse guichet générée automatiquement)' })
+  @IsOptional()
+  @IsEmail({}, { message: 'Email invalide' })
+  email?: string;
+
+  @ApiPropertyOptional({ minLength: 8, description: 'Mot de passe à définir (minimum 8 caractères)' })
+  @IsOptional()
+  @IsString()
+  @MinLength(8, { message: 'Le mot de passe doit contenir au moins 8 caractères' })
+  password?: string;
 }

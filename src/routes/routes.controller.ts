@@ -12,16 +12,16 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { RoutesService } from './routes.service';
 import { CreateRouteDto, UpdateRouteDto } from './dto/route.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '@transpro/shared';
+import { PERM } from '@transpro/shared';
 
 @ApiTags('Itinéraires')
 @Controller({ path: 'routes', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission(PERM.ROUTES_MANAGE)
 @ApiBearerAuth()
-@Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
 export class RoutesController {
   constructor(private routesService: RoutesService) {}
 

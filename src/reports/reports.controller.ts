@@ -21,11 +21,12 @@ export class ReportsController {
   @ApiOperation({ summary: 'Rapport ventes journalières (PDF ou CSV)' })
   async dailySales(
     @Res() reply: any,
+    @CurrentUser('sub') userId: string,
     @CurrentUser('tenantId') tenantId: string,
     @Query('date') date: string,
     @Query('format') format: 'pdf' | 'csv' = 'pdf',
   ) {
-    const result = await this.reports.dailySales(tenantId, date, format);
+    const result = await this.reports.dailySales(userId, tenantId, date, format);
     reply.header('Content-Type', result.mimetype);
     reply.header('Content-Disposition', `attachment; filename="${result.filename}"`);
     reply.send(result.buffer);
@@ -35,11 +36,12 @@ export class ReportsController {
   @ApiOperation({ summary: 'Bilan hebdomadaire (PDF ou CSV)' })
   async weeklySummary(
     @Res() reply: any,
+    @CurrentUser('sub') userId: string,
     @CurrentUser('tenantId') tenantId: string,
     @Query('weekStart') weekStart: string,
     @Query('format') format: 'pdf' | 'csv' = 'pdf',
   ) {
-    const result = await this.reports.weeklySummary(tenantId, weekStart, format);
+    const result = await this.reports.weeklySummary(userId, tenantId, weekStart, format);
     reply.header('Content-Type', result.mimetype);
     reply.header('Content-Disposition', `attachment; filename="${result.filename}"`);
     reply.send(result.buffer);
@@ -50,10 +52,11 @@ export class ReportsController {
   async tripReport(
     @Res() reply: any,
     @Param('tripId') tripId: string,
+    @CurrentUser('sub') userId: string,
     @CurrentUser('tenantId') tenantId: string,
     @Query('format') format: 'pdf' | 'csv' = 'pdf',
   ) {
-    const result = await this.reports.tripReport(tenantId, tripId, format);
+    const result = await this.reports.tripReport(userId, tenantId, tripId, format);
     reply.header('Content-Type', result.mimetype);
     reply.header('Content-Disposition', `attachment; filename="${result.filename}"`);
     reply.send(result.buffer);

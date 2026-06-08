@@ -71,6 +71,13 @@ export class TripsController {
     return this.trips.getSeats(id);
   }
 
+  @Public()
+  @Get(':id/location')
+  @ApiOperation({ summary: 'Dernière position GPS connue d\'un voyage (passagers)' })
+  getLocation(@Param('id') id: string) {
+    return this.trips.getLastLocation(id);
+  }
+
   @Patch(':id/status')
   @ApiBearerAuth()
   @RequirePermission(PERM.TRIPS_UPDATE_STATUS)

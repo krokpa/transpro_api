@@ -58,7 +58,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Compte désactivé ou introuvable');
     }
 
-    // SUPER_ADMIN a toutes les permissions sans profil
+    // Récupérer le driverId si le user est un chauffeur
+    let driverId: string | undefined;
+    if (user.role === UserRole.DRIVER) {
+      const driver = await this.prisma.driver.findUnique({
+        where: { userId: user.id },
+        select: { id: true },
+      });
+      driverId = driver?.id;
+    }
+
     const isSuperAdmin = user.role === UserRole.SUPER_ADMIN;
     let perms: string[] = isSuperAdmin ? Object.values(PERM) : [];
 
@@ -99,8 +108,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const { userStations, companyProfile, ...rest } = user;
     return {
       ...rest,
+      driverId: driverId ?? null,
       stationId: userStations.find((s) => s.isPrimary)?.stationId ?? userStations[0]?.stationId ?? null,
-      // Toutes les gares de l'utilisateur avec leurs profils (pour verifyAccess)
       stationIds: userStations.map((s) => s.stationId),
       perms,
     };

@@ -339,7 +339,12 @@ export class StationsService {
   ) {
     const page = params?.page ?? 1;
     const limit = params?.limit ?? 20;
-    const where: any = { tenantId, soldByStationId: stationId };
+    // Inclut toutes les réservations sur des trajets au départ de cette gare,
+    // qu'elles aient été vendues au guichet ou réservées en ligne/admin.
+    const where: any = {
+      tenantId,
+      trip: { departureStationId: stationId },
+    };
     if (params?.status) where.status = params.status;
     if (params?.search) {
       const q = params.search.toLowerCase();

@@ -286,14 +286,17 @@ export class PaymentsService {
         where: { tripId: booking.tripId, seatNumber: { in: booking.seatNumbers } },
         data: { status: 'OCCUPIED', lockedAt: null, lockedBy: null },
       });
-      await tx.ticket.createMany({
-        data: tickets.map((t) => ({
-          bookingId,
-          seatNumber: t.seatNumber,
-          qrCode: t.qrCode,
-          qrCodeData: t.qrCodeData,
-        })),
-      });
+      const existingCount = await tx.ticket.count({ where: { bookingId } });
+      if (existingCount === 0) {
+        await tx.ticket.createMany({
+          data: tickets.map((t) => ({
+            bookingId,
+            seatNumber: t.seatNumber,
+            qrCode: t.qrCode,
+            qrCodeData: t.qrCodeData,
+          })),
+        });
+      }
     });
 
     if (alreadyConfirmed) {
@@ -576,7 +579,9 @@ export class PaymentsService {
       data: { isScanned: true, scannedAt: new Date(), scannedBy: agentId },
     });
 
-    return { valid: true, ticket, booking: ticket.booking };
+    const result = { valid: true, ticket, booking: ticket.booking };
+    this.realtime.sendToUser(agentId, SocketEvent.TICKET_SCANNED, result);
+    return result;
   }
 
   private async initiateGeniusPay(params: {

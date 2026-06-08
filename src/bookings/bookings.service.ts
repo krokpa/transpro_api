@@ -601,6 +601,131 @@ export class BookingsService {
     });
   }
 
+  async updateStatus(bookingId: string, tenantId: string, status: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: bookingId, tenantId },
+      select: {
+        id: true, status: true, tripId: true, tenantId: true,
+        passengerId: true, seatNumbers: true, reference: true,
+        _count: { select: { tickets: true } },
+      },
+    });
+    if (!booking) throw new NotFoundException('Réservation introuvable');
+
+    const allowed: Record<string, string[]> = {
+      PENDING:   ['CONFIRMED', 'CANCELLED'],
+      CONFIRMED: ['COMPLETED', 'NO_SHOW', 'CANCELLED'],
+      COMPLETED: [],
+      NO_SHOW:   [],
+      CANCELLED: [],
+    };
+    if (!allowed[booking.status]?.includes(status)) {
+      throw new BadRequestException(`Transition ${booking.status} → ${status} non autorisée`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const data: any = { status };
+
+      if (status === 'CONFIRMED') {
+        data.confirmedAt = new Date();
+        await tx.tripSeat.updateMany({
+          where: { tripId: booking.tripId, seatNumber: { in: booking.seatNumbers } },
+          data: { status: 'OCCUPIED', lockedAt: null, lockedBy: null },
+        });
+
+        if (booking._count.tickets === 0) {
+          const ticketsData = await Promise.all(
+            booking.seatNumbers.map(async (seatNumber) => {
+              const ticketData = {
+                bookingRef: booking.reference,
+                tripId:     booking.tripId,
+                seatNumber,
+                passengerId: booking.passengerId,
+                issuedAt:   new Date().toISOString(),
+              };
+              const sig     = this.signTicket(ticketData);
+              const qrData  = JSON.stringify({ ...ticketData, sig });
+              const qrCode  = await QRCode.toDataURL(qrData);
+              return { seatNumber, qrCode, qrCodeData: qrData };
+            }),
+          );
+          await tx.ticket.createMany({
+            data: ticketsData.map((t) => ({
+              bookingId,
+              seatNumber:  t.seatNumber,
+              qrCode:      t.qrCode,
+              qrCodeData:  t.qrCodeData,
+            })),
+          });
+        }
+      }
+
+      if (status === 'CANCELLED') {
+        data.cancelledAt = new Date();
+        data.cancelReason = 'Annulation manuelle par l\'administration';
+        await this.releaseSeats(tx, booking.tripId, booking.seatNumbers);
+      }
+
+      await tx.booking.update({ where: { id: bookingId }, data });
+    });
+
+    if (status === 'CANCELLED') {
+      for (const seatNumber of booking.seatNumbers) {
+        this.realtime.broadcastToTrip(booking.tripId, SocketEvent.SEAT_UPDATED, {
+          tripId: booking.tripId, seatNumber, status: 'AVAILABLE',
+        });
+      }
+      this.realtime.broadcastToCompany(booking.tenantId, SocketEvent.BOOKING_CANCELLED, { bookingId });
+    } else if (status === 'CONFIRMED') {
+      for (const seatNumber of booking.seatNumbers) {
+        this.realtime.broadcastToTrip(booking.tripId, SocketEvent.SEAT_UPDATED, {
+          tripId: booking.tripId, seatNumber, status: 'OCCUPIED',
+        });
+      }
+    }
+
+    return this.findOne(bookingId, tenantId);
+  }
+
+  async generateMissingTickets(bookingId: string, tenantId: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: bookingId, tenantId, status: 'CONFIRMED' },
+      select: {
+        id: true, reference: true, tripId: true, passengerId: true, seatNumbers: true,
+        _count: { select: { tickets: true } },
+      },
+    });
+    if (!booking) throw new NotFoundException('Réservation introuvable ou non confirmée');
+    if (booking._count.tickets > 0) return { generated: 0, message: 'Les tickets existent déjà' };
+
+    const ticketsData = await Promise.all(
+      booking.seatNumbers.map(async (seatNumber) => {
+        const ticketData = {
+          bookingRef:  booking.reference,
+          tripId:      booking.tripId,
+          seatNumber,
+          passengerId: booking.passengerId,
+          issuedAt:    new Date().toISOString(),
+        };
+        const sig    = this.signTicket(ticketData);
+        const qrData = JSON.stringify({ ...ticketData, sig });
+        const qrCode = await QRCode.toDataURL(qrData);
+        return { seatNumber, qrCode, qrCodeData: qrData };
+      }),
+    );
+
+    await this.prisma.ticket.createMany({
+      data: ticketsData.map((t) => ({
+        bookingId,
+        seatNumber: t.seatNumber,
+        qrCode:     t.qrCode,
+        qrCodeData: t.qrCodeData,
+      })),
+    });
+
+    return { generated: ticketsData.length };
+  }
+
   private signTicket(data: object): string {
     return crypto
       .createHmac('sha256', this.encryptionKey)

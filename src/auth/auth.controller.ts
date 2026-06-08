@@ -2,7 +2,7 @@ import { Controller, Post, Get, Body, UseGuards, HttpCode, HttpStatus } from '@n
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, LoginByPhoneDto, RefreshTokenDto } from './dto/register.dto';
+import { RegisterDto, LoginDto, LoginByPhoneDto, RefreshTokenDto, SocialAuthDto } from './dto/register.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
@@ -34,12 +34,22 @@ export class AuthController {
 
   @Public()
   @UseGuards(ThrottlerGuard)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })  // 10 vérifications/min
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('check-phone')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Vérifier si un numéro est enregistré (pour le flow connexion OTP)' })
   checkPhone(@Body('phone') phone: string) {
     return this.auth.checkPhoneExists(phone);
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post('check-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Vérifier si un email est déjà utilisé (inscription)" })
+  checkEmail(@Body('email') email: string) {
+    return this.auth.checkEmailExists(email);
   }
 
   @Public()
@@ -50,6 +60,16 @@ export class AuthController {
   @ApiOperation({ summary: 'Connexion par numéro de téléphone + OTP' })
   loginByPhone(@Body() dto: LoginByPhoneDto) {
     return this.auth.loginByPhone(dto);
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @Post('social')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Connexion / inscription via réseau social (Google, Facebook)' })
+  socialLogin(@Body() dto: SocialAuthDto) {
+    return this.auth.socialLogin(dto.provider, dto.idToken);
   }
 
   @Public()

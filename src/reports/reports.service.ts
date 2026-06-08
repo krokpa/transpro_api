@@ -6,7 +6,14 @@ import dayjs from 'dayjs';
 const PDFDoc = require('pdfkit') as typeof import('pdfkit');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-const BRAND = '#f05a1a';
+const THEME_HEX: Record<string, string> = {
+  orange:  '#f97316',
+  blue:    '#3b82f6',
+  purple:  '#8b5cf6',
+  green:   '#10b981',
+  rose:    '#f43f5e',
+  teal:    '#0ea5e9',
+};
 const DARK = '#1e293b';
 const GRAY = '#6b7280';
 const LIGHT = '#f8fafc';
@@ -48,13 +55,13 @@ function buildCsv(headers: string[], rows: string[][]): string {
 }
 
 // ─── PDF drawing helpers ─────────────────────────────────────────────────────
-function pdfHeader(doc: any, company: string, title: string, period: string): number {
-  doc.fillColor(BRAND).rect(MARGIN, 30, CONTENT_W, 3).fill();
+function pdfHeader(doc: any, company: string, title: string, period: string, brand: string): number {
+  doc.fillColor(brand).rect(MARGIN, 30, CONTENT_W, 3).fill();
 
   doc.fillColor(DARK).font('Helvetica-Bold').fontSize(15)
     .text(company, MARGIN, 44, { width: 260, lineBreak: false });
 
-  doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(12)
+  doc.fillColor(brand).font('Helvetica-Bold').fontSize(12)
     .text(title, MARGIN + 255, 46, { width: 260, align: 'right', lineBreak: false });
 
   doc.fillColor(GRAY).font('Helvetica').fontSize(9)
@@ -74,6 +81,7 @@ function pdfKpis(
   doc: any,
   kpis: { label: string; value: string; sub?: string }[],
   y: number,
+  brand: string,
 ): number {
   const n = kpis.length;
   const gap = 8;
@@ -88,7 +96,7 @@ function pdfKpis(
     doc.fillColor(GRAY).font('Helvetica').fontSize(8)
       .text(k.label, x + 10, y + 27, { width: boxW - 20, lineBreak: false });
     if (k.sub) {
-      doc.fillColor(BRAND).font('Helvetica').fontSize(7)
+      doc.fillColor(brand).font('Helvetica').fontSize(7)
         .text(k.sub, x + 10, y + 39, { width: boxW - 20, lineBreak: false });
     }
   });
@@ -194,12 +202,12 @@ export class ReportsService {
   constructor(private prisma: PrismaService) {}
 
   // ── Daily Sales ────────────────────────────────────────────────────────────
-  async dailySales(tenantId: string, dateStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
+  async dailySales(userId: string, tenantId: string, dateStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
     const date = dayjs(dateStr).isValid() ? dayjs(dateStr) : dayjs();
     const start = date.startOf('day').toDate();
     const end = date.endOf('day').toDate();
 
-    const [tenant, bookings] = await Promise.all([
+    const [tenant, bookings, brand] = await Promise.all([
       this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true } }),
       this.prisma.booking.findMany({
         where: { tenantId, createdAt: { gte: start, lte: end } },
@@ -210,6 +218,7 @@ export class ReportsService {
         },
         orderBy: { createdAt: 'asc' },
       }),
+      this.getThemeBrand(userId),
     ]);
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
@@ -259,7 +268,7 @@ export class ReportsService {
     }
 
     const buffer = await buildPdf((doc) => {
-      let y = pdfHeader(doc, company, 'Ventes journalières', frenchFull(date));
+      let y = pdfHeader(doc, company, 'Ventes journalières', frenchFull(date), brand);
 
       y = pdfKpis(doc, [
         { label: "Chiffre d'affaires", value: fmtAmt(totalRevenue) },
@@ -272,7 +281,7 @@ export class ReportsService {
           label: 'Montant moyen',
           value: confirmed.length > 0 ? fmtAmt(totalRevenue / confirmed.length) : '0 FCFA',
         },
-      ], y);
+      ], y, brand);
 
       y = pdfTableHead(doc, cols, y);
       rows.forEach((row, i) => {
@@ -288,11 +297,11 @@ export class ReportsService {
   }
 
   // ── Weekly Summary ─────────────────────────────────────────────────────────
-  async weeklySummary(tenantId: string, weekStartStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
+  async weeklySummary(userId: string, tenantId: string, weekStartStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
     const weekStart = (dayjs(weekStartStr).isValid() ? dayjs(weekStartStr) : dayjs()).startOf('day');
     const weekEnd = weekStart.add(6, 'day').endOf('day');
 
-    const [tenant, payments, bookings] = await Promise.all([
+    const [tenant, payments, bookings, brand] = await Promise.all([
       this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true } }),
       this.prisma.payment.findMany({
         where: { tenantId, status: 'SUCCESS', paidAt: { gte: weekStart.toDate(), lte: weekEnd.toDate() } },
@@ -302,6 +311,7 @@ export class ReportsService {
         where: { tenantId, createdAt: { gte: weekStart.toDate(), lte: weekEnd.toDate() } },
         select: { createdAt: true, status: true, totalAmount: true },
       }),
+      this.getThemeBrand(userId),
     ]);
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
@@ -348,6 +358,7 @@ export class ReportsService {
       let y = pdfHeader(
         doc, company, 'Bilan hebdomadaire',
         `${frenchShort(weekStart)} – ${frenchShort(weekEnd)}  ${weekEnd.year()}`,
+        brand,
       );
 
       y = pdfKpis(doc, [
@@ -355,7 +366,7 @@ export class ReportsService {
         { label: 'Réservations totales', value: bookings.length.toString() },
         { label: 'Confirmées', value: totalConfirmed.toString() },
         { label: 'Annulées', value: totalCancelled.toString() },
-      ], y);
+      ], y, brand);
 
       y = pdfTableHead(doc, cols, y);
       days.forEach((d, i) => {
@@ -369,11 +380,11 @@ export class ReportsService {
   }
 
   // ── Trip Report ────────────────────────────────────────────────────────────
-  async tripReport(tenantId: string, tripId: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
-    const [tenant, trip] = await Promise.all([
+  async tripReport(userId: string, tenantId: string, tripId: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
+    const [tenant, trip, brand] = await Promise.all([
       this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true } }),
       this.prisma.trip.findFirst({
-        where: { id: tripId, tenantId },   // isolation tenant dans la requête
+        where: { id: tripId, tenantId },
         include: {
           route: true,
           vehicle: true,
@@ -387,6 +398,7 @@ export class ReportsService {
           },
         },
       }),
+      this.getThemeBrand(userId),
     ]);
 
     if (!trip) throw new NotFoundException('Voyage introuvable');
@@ -436,6 +448,7 @@ export class ReportsService {
       let y = pdfHeader(
         doc, company, 'Rapport de voyage',
         `${(trip.route as any).originCity?.name ?? ''} → ${(trip.route as any).destinationCity?.name ?? ''}  ·  ${frenchFull(dep)} à ${dep.format('HH:mm')}`,
+        brand,
       );
 
       // Trip info strip
@@ -458,7 +471,7 @@ export class ReportsService {
         { label: 'Revenus voyage', value: fmtAmt(totalRevenue) },
         { label: 'Passagers', value: `${occupied} / ${trip.totalSeats}`, sub: `${occupancy}% d'occupation` },
         { label: 'Réservations', value: trip.bookings.length.toString() },
-      ], y);
+      ], y, brand);
 
       doc.fillColor(DARK).font('Helvetica-Bold').fontSize(10)
         .text('Manifeste passagers', MARGIN, y, { lineBreak: false });
@@ -482,12 +495,12 @@ export class ReportsService {
   }
 
   // ── Station Daily Sales ────────────────────────────────────────────────────
-  async stationDailySales(stationId: string, tenantId: string, dateStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
+  async stationDailySales(userId: string, stationId: string, tenantId: string, dateStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
     const date = dayjs(dateStr).isValid() ? dayjs(dateStr) : dayjs();
     const start = date.startOf('day').toDate();
     const end = date.endOf('day').toDate();
 
-    const [station, bookings] = await Promise.all([
+    const [station, bookings, brand] = await Promise.all([
       this.prisma.station.findFirst({ where: { id: stationId, tenantId }, select: { name: true, city: { select: { name: true } }, code: true } }),
       this.prisma.booking.findMany({
         where: { tenantId, soldByStationId: stationId, createdAt: { gte: start, lte: end } },
@@ -498,6 +511,7 @@ export class ReportsService {
         },
         orderBy: { createdAt: 'asc' },
       }),
+      this.getThemeBrand(userId),
     ]);
 
     if (!station) throw new NotFoundException('Gare introuvable');
@@ -548,12 +562,12 @@ export class ReportsService {
     }
 
     const buffer = await buildPdf((doc) => {
-      let y = pdfHeader(doc, stationLabel, 'Ventes journalières', frenchFull(date));
+      let y = pdfHeader(doc, stationLabel, 'Ventes journalières', frenchFull(date), brand);
       y = pdfKpis(doc, [
         { label: "Chiffre d'affaires", value: fmtAmt(totalRevenue) },
         { label: 'Billets vendus', value: bookings.length.toString(), sub: `${confirmed.length} confirmés · ${cancelled.length} annulés` },
         { label: 'Montant moyen', value: confirmed.length > 0 ? fmtAmt(totalRevenue / confirmed.length) : '0 FCFA' },
-      ], y);
+      ], y, brand);
       y = pdfTableHead(doc, cols, y);
       rows.forEach((row, i) => {
         if (y > doc.page.height - 70) { doc.addPage(); y = pdfTableHead(doc, cols, 40); }
@@ -565,11 +579,11 @@ export class ReportsService {
   }
 
   // ── Station Weekly Summary ─────────────────────────────────────────────────
-  async stationWeeklySummary(stationId: string, tenantId: string, weekStartStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
+  async stationWeeklySummary(userId: string, stationId: string, tenantId: string, weekStartStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
     const weekStart = (dayjs(weekStartStr).isValid() ? dayjs(weekStartStr) : dayjs()).startOf('day');
     const weekEnd = weekStart.add(6, 'day').endOf('day');
 
-    const [station, payments, bookings] = await Promise.all([
+    const [station, payments, bookings, brand] = await Promise.all([
       this.prisma.station.findFirst({ where: { id: stationId, tenantId }, select: { name: true, city: { select: { name: true } }, code: true } }),
       this.prisma.payment.findMany({
         where: {
@@ -583,6 +597,7 @@ export class ReportsService {
         where: { tenantId, soldByStationId: stationId, createdAt: { gte: weekStart.toDate(), lte: weekEnd.toDate() } },
         select: { createdAt: true, status: true, totalAmount: true },
       }),
+      this.getThemeBrand(userId),
     ]);
 
     if (!station) throw new NotFoundException('Gare introuvable');
@@ -632,13 +647,13 @@ export class ReportsService {
     }
 
     const buffer = await buildPdf((doc) => {
-      let y = pdfHeader(doc, stationLabel, 'Bilan hebdomadaire', `${frenchShort(weekStart)} – ${frenchShort(weekEnd)}  ${weekEnd.year()}`);
+      let y = pdfHeader(doc, stationLabel, 'Bilan hebdomadaire', `${frenchShort(weekStart)} – ${frenchShort(weekEnd)}  ${weekEnd.year()}`, brand);
       y = pdfKpis(doc, [
         { label: "Chiffre d'affaires", value: fmtAmt(totalRevenue) },
         { label: 'Billets vendus', value: bookings.length.toString() },
         { label: 'Confirmés', value: totalConfirmed.toString() },
         { label: 'Annulés', value: totalCancelled.toString() },
-      ], y);
+      ], y, brand);
 
       y = pdfTableHead(doc, cols, y);
       days.forEach((d, i) => {
@@ -664,11 +679,11 @@ export class ReportsService {
   }
 
   // ── Station Trip Report ────────────────────────────────────────────────────
-  async stationTripReport(stationId: string, tenantId: string, tripId: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
-    const [station, trip] = await Promise.all([
+  async stationTripReport(userId: string, stationId: string, tenantId: string, tripId: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
+    const [station, trip, brand] = await Promise.all([
       this.prisma.station.findFirst({ where: { id: stationId, tenantId }, select: { name: true, code: true } }),
       this.prisma.trip.findFirst({
-        where: { id: tripId, tenantId },   // isolation tenant dans la requête
+        where: { id: tripId, tenantId },
         include: {
           route: true,
           vehicle: true,
@@ -682,6 +697,7 @@ export class ReportsService {
           },
         },
       }),
+      this.getThemeBrand(userId),
     ]);
 
     if (!station) throw new NotFoundException('Gare introuvable');
@@ -732,6 +748,7 @@ export class ReportsService {
       let y = pdfHeader(
         doc, stationLabel, 'Manifeste de voyage',
         `${(trip.route as any).originCity?.name ?? ''} → ${(trip.route as any).destinationCity?.name ?? ''}  ·  ${frenchFull(dep)} à ${dep.format('HH:mm')}`,
+        brand,
       );
 
       doc.fillColor('#f1f5f9').rect(MARGIN, y, CONTENT_W, 46).fill();
@@ -753,7 +770,7 @@ export class ReportsService {
         { label: 'Revenus voyage', value: fmtAmt(totalRevenue) },
         { label: 'Passagers embarqués', value: `${occupied} / ${trip.totalSeats}`, sub: `${occupancy}% d'occupation` },
         { label: 'Réservations actives', value: trip.bookings.length.toString() },
-      ], y);
+      ], y, brand);
 
       doc.fillColor(DARK).font('Helvetica-Bold').fontSize(10).text('Liste des passagers', MARGIN, y);
       y += 16;
@@ -769,5 +786,13 @@ export class ReportsService {
       filename: `gare-voyage-${safeName}-${fmtDate(trip.departureAt, 'YYYY-MM-DD')}.pdf`,
       mimetype: 'application/pdf',
     };
+  }
+
+  private async getThemeBrand(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { themeAccent: true },
+    });
+    return THEME_HEX[user?.themeAccent ?? 'orange'] ?? THEME_HEX.orange;
   }
 }

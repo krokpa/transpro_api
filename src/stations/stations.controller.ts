@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Body, Param, Query, Res, UseGuards, ForbiddenException,
+  Body, Param, Query, Res, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { StationsService } from './stations.service';
@@ -9,6 +9,7 @@ import { CreateStationDto, UpdateStationDto, AssignMemberDto } from './dto/stati
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { StationAccessGuard } from '../common/guards/station-access.guard';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -25,16 +26,6 @@ export class StationsController {
     private reports: ReportsService,
   ) {}
 
-  /** Vérifie qu'un agent n'accède qu'à ses gares assignées. */
-  private assertStationAccess(user: any, stationId: string) {
-    if (user.role === UserRole.SUPER_ADMIN) return;
-    if (user.role === UserRole.COMPANY_OWNER || user.role === UserRole.COMPANY_ADMIN) return;
-    // COMPANY_AGENT : doit être assigné à la gare
-    const assigned: string[] = user.stationIds ?? (user.stationId ? [user.stationId] : []);
-    if (!assigned.includes(stationId)) {
-      throw new ForbiddenException('Accès refusé : vous n\'êtes pas affecté à cette gare');
-    }
-  }
 
   @Public()
   @Get('by-city')
@@ -93,10 +84,10 @@ export class StationsController {
   // ── Members ──────────────────────────────────────────────────────────────
 
   @Get(':id/members')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.TEAM_VIEW)
   @ApiOperation({ summary: 'Membres affectés à la gare' })
   getMembers(@Param('id') id: string, @CurrentUser() user: any) {
-    this.assertStationAccess(user, id);
     return this.stations.getMembers(id, user.tenantId);
   }
 
@@ -125,14 +116,15 @@ export class StationsController {
   // ── Station workspace ─────────────────────────────────────────────────────
 
   @Get(':id/dashboard')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.TRIPS_VIEW)
   @ApiOperation({ summary: 'Tableau de bord de la gare (stats du jour)' })
   getDashboard(@Param('id') id: string, @CurrentUser() user: any) {
-    this.assertStationAccess(user, id);
     return this.stations.getDashboard(id, user.tenantId);
   }
 
   @Get(':id/trips')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.TRIPS_VIEW)
   @ApiOperation({ summary: 'Voyages au départ de la gare (jour courant ou date précisée)' })
   getTodayTrips(
@@ -140,11 +132,11 @@ export class StationsController {
     @CurrentUser() user: any,
     @Query('date') date?: string,
   ) {
-    this.assertStationAccess(user, id);
     return this.stations.getTodayTrips(id, user.tenantId, date);
   }
 
   @Get(':id/bookings')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.BOOKINGS_VIEW)
   @ApiOperation({ summary: 'Réservations vendues par la gare' })
   getBookings(
@@ -155,7 +147,6 @@ export class StationsController {
     @Query('limit') limit?: string,
     @Query('search') search?: string,
   ) {
-    this.assertStationAccess(user, id);
     return this.stations.getBookings(id, user.tenantId, {
       status,
       page: page ? parseInt(page, 10) : undefined,
@@ -165,6 +156,7 @@ export class StationsController {
   }
 
   @Get(':id/caisse')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.REPORTS_STATION)
   @ApiOperation({ summary: 'Caisse de la gare' })
   getCaisse(
@@ -172,13 +164,13 @@ export class StationsController {
     @CurrentUser() user: any,
     @Query('date') date?: string,
   ) {
-    this.assertStationAccess(user, id);
     return this.stations.getCaisse(id, user.tenantId, date);
   }
 
   // ── Analytics ─────────────────────────────────────────────────────────────
 
   @Get(':id/analytics')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.REPORTS_STATION)
   @ApiOperation({ summary: 'Analytiques de la gare (30 derniers jours par défaut)' })
   getAnalytics(
@@ -186,13 +178,13 @@ export class StationsController {
     @CurrentUser() user: any,
     @Query('days') days?: string,
   ) {
-    this.assertStationAccess(user, id);
     return this.stations.getAnalytics(id, user.tenantId, days ? parseInt(days, 10) : 30);
   }
 
   // ── Reports ───────────────────────────────────────────────────────────────
 
   @Get(':id/reports/daily-sales')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.REPORTS_STATION)
   @ApiOperation({ summary: 'Rapport ventes journalières de la gare (PDF/CSV)' })
   async reportDailySales(
@@ -202,14 +194,14 @@ export class StationsController {
     @Query('format') format: 'pdf' | 'csv' = 'pdf',
     @Res() reply: any,
   ) {
-    this.assertStationAccess(user, id);
-    const out = await this.reports.stationDailySales(id, user.tenantId, date, format);
+    const out = await this.reports.stationDailySales(user.sub, id, user.tenantId, date, format);
     reply.header('Content-Type', out.mimetype);
     reply.header('Content-Disposition', `attachment; filename="${out.filename}"`);
     reply.send(out.buffer);
   }
 
   @Get(':id/reports/weekly-summary')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.REPORTS_STATION)
   @ApiOperation({ summary: 'Bilan hebdomadaire de la gare (PDF/CSV)' })
   async reportWeeklySummary(
@@ -219,14 +211,14 @@ export class StationsController {
     @Query('format') format: 'pdf' | 'csv' = 'pdf',
     @Res() reply: any,
   ) {
-    this.assertStationAccess(user, id);
-    const out = await this.reports.stationWeeklySummary(id, user.tenantId, weekStart, format);
+    const out = await this.reports.stationWeeklySummary(user.sub, id, user.tenantId, weekStart, format);
     reply.header('Content-Type', out.mimetype);
     reply.header('Content-Disposition', `attachment; filename="${out.filename}"`);
     reply.send(out.buffer);
   }
 
   @Get(':id/reports/trip/:tripId')
+  @UseGuards(StationAccessGuard)
   @RequirePermission(PERM.REPORTS_STATION)
   @ApiOperation({ summary: 'Manifeste d\'un voyage (PDF/CSV)' })
   async reportTrip(
@@ -236,8 +228,7 @@ export class StationsController {
     @Query('format') format: 'pdf' | 'csv' = 'pdf',
     @Res() reply: any,
   ) {
-    this.assertStationAccess(user, id);
-    const out = await this.reports.stationTripReport(id, user.tenantId, tripId, format);
+    const out = await this.reports.stationTripReport(user.sub, id, user.tenantId, tripId, format);
     reply.header('Content-Type', out.mimetype);
     reply.header('Content-Disposition', `attachment; filename="${out.filename}"`);
     reply.send(out.buffer);

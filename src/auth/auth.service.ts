@@ -73,6 +73,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       include: {
+        driver: { select: { id: true } },
         userStations: {
           where: { station: { isActive: true } },
           include: { station: { select: { id: true, name: true, code: true, isActive: true, city: { select: { name: true } } } } },
@@ -85,7 +86,7 @@ export class AuthService {
       throw new UnauthorizedException('Identifiants invalides');
     }
 
-    const isValid = await bcrypt.compare(dto.password, user.passwordHash);
+    const isValid = user.passwordHash && await bcrypt.compare(dto.password, user.passwordHash);
     if (!isValid) {
       throw new UnauthorizedException('Identifiants invalides');
     }
@@ -104,9 +105,10 @@ export class AuthService {
       return { requires2fa: true, twoFactorToken };
     }
 
-    const { passwordHash: _, ...userWithoutPassword } = user;
-    const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined);
-    return { user: userWithoutPassword, ...tokens };
+    const { passwordHash: _, driver, ...userWithoutPassword } = user;
+    const driverId = driver?.id;
+    const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined, driverId);
+    return { user: { ...userWithoutPassword, driverId }, ...tokens };
   }
 
   async checkPhoneExists(phone: string): Promise<{ exists: boolean }> {
@@ -117,13 +119,21 @@ export class AuthService {
     return { exists: !!user };
   }
 
+  async checkEmailExists(email: string): Promise<{ exists: boolean }> {
+    const user = await this.prisma.user.findUnique({
+      where:  { email },
+      select: { id: true },
+    });
+    return { exists: !!user };
+  }
+
   async loginByPhone(dto: LoginByPhoneDto) {
-    // Vérifie l'OTP (rate-limit, attempts, expiry, marks as used)
     await this.otpService.verify(dto.phone, dto.code);
 
     const user = await this.prisma.user.findUnique({
       where: { phone: dto.phone },
       include: {
+        driver: { select: { id: true } },
         userStations: {
           where: { station: { isActive: true } },
           include: { station: { select: { id: true, name: true, code: true, isActive: true, city: { select: { name: true } } } } },
@@ -132,7 +142,6 @@ export class AuthService {
       },
     });
 
-    // Message générique — ne pas révéler si le numéro est enregistré
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Impossible de se connecter avec ce numéro');
     }
@@ -142,9 +151,14 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    const { passwordHash: _, totpSecret: __, totpBackupCodes: ___, ...userWithoutSecrets } = user;
-    const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined);
-    return { user: userWithoutSecrets, ...tokens };
+    const { passwordHash: _, totpSecret: __, totpBackupCodes: ___, driver, ...userWithoutSecrets } = user;
+    const driverId = driver?.id;
+    const tokens = await this.generateTokens(
+      user.id, user.email, user.role as any,
+      user.tenantId ?? undefined,
+      driverId,
+    );
+    return { user: { ...userWithoutSecrets, driverId }, ...tokens };
   }
 
   async verifyTotpLogin(twoFactorToken: string, code: string) {
@@ -164,6 +178,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       include: {
+        driver: { select: { id: true } },
         userStations: {
           where: { station: { isActive: true } },
           include: { station: { select: { id: true, name: true, code: true, isActive: true, city: { select: { name: true } } } } },
@@ -192,9 +207,10 @@ export class AuthService {
       await this.prisma.user.update({ where: { id: user.id }, data: { totpBackupCodes: newCodes } });
     }
 
-    const { passwordHash: _, totpSecret: __, totpBackupCodes: ___, ...userWithoutSecrets } = user;
-    const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined);
-    return { user: userWithoutSecrets, ...tokens };
+    const { passwordHash: _, totpSecret: __, totpBackupCodes: ___, driver, ...userWithoutSecrets } = user;
+    const driverId = driver?.id;
+    const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined, driverId);
+    return { user: { ...userWithoutSecrets, driverId }, ...tokens };
   }
 
   async generateTotpSetup(userId: string) {
@@ -260,8 +276,13 @@ export class AuthService {
     return { message: '2FA désactivé' };
   }
 
-  private async loadUserPermissions(userId: string, role: string): Promise<string[]> {
-    if (role === 'SUPER_ADMIN') return Object.values(PERM);
+  private async loadUserPermissions(
+    userId: string,
+    role: string,
+  ): Promise<{ perms: string[]; stationIds: string[] }> {
+    if (role === 'SUPER_ADMIN') {
+      return { perms: Object.values(PERM), stationIds: [] };
+    }
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -270,7 +291,9 @@ export class AuthService {
           select: { permissions: { select: { permissionCode: true } } },
         },
         userStations: {
+          where: { station: { isActive: true } },
           select: {
+            stationId: true,
             stationProfile: {
               select: { permissions: { select: { permissionCode: true } } },
             },
@@ -278,6 +301,8 @@ export class AuthService {
         },
       },
     });
+
+    const stationIds = user?.userStations.map((s) => s.stationId) ?? [];
 
     let companyPerms = user?.companyProfile?.permissions.map((p) => p.permissionCode) ?? [];
 
@@ -287,12 +312,12 @@ export class AuthService {
         [UserRole.COMPANY_OWNER]: 'COMPANY_OWNER',
         [UserRole.COMPANY_ADMIN]: 'COMPANY_ADMIN',
         [UserRole.COMPANY_AGENT]: 'STATION_AGENT',
+        [UserRole.DRIVER]: 'DRIVER',
       };
       const defaultProfile = roleProfileMap[role];
       if (defaultProfile) {
         companyPerms = [...(SYSTEM_PROFILES[defaultProfile].permissions as string[])];
       }
-      // Les passagers voient les voyages (détails de réservation, suivi, sièges)
       if (role === UserRole.PASSENGER) {
         companyPerms = [PERM.TRIPS_VIEW];
       }
@@ -306,7 +331,10 @@ export class AuthService {
       stationPerms = [...(SYSTEM_PROFILES.STATION_AGENT.permissions as string[])];
     }
 
-    return [...new Set([...companyPerms, ...stationPerms])];
+    return {
+      perms: [...new Set([...companyPerms, ...stationPerms])],
+      stationIds,
+    };
   }
 
   private async findBackupCode(hashedCodes: string[], code: string): Promise<number> {
@@ -320,7 +348,7 @@ export class AuthService {
   async refreshTokens(refreshToken: string): Promise<AuthTokens> {
     const stored = await this.prisma.refreshToken.findUnique({
       where: { token: refreshToken },
-      include: { user: true },
+      include: { user: { include: { driver: { select: { id: true } } } } },
     });
 
     if (!stored || stored.expiresAt < new Date()) {
@@ -334,6 +362,7 @@ export class AuthService {
       stored.user.email,
       stored.user.role as any,
       stored.user.tenantId ?? undefined,
+      stored.user.driver?.id,
     );
   }
 
@@ -349,7 +378,7 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    return this.prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -364,6 +393,8 @@ export class AuthService {
         totpEnabled: true,
         preferredLang: true,
         avatar: true,
+        themeAccent: true,
+        themeSidebar: true,
         createdAt: true,
         tenant: {
           select: {
@@ -382,6 +413,9 @@ export class AuthService {
         },
       },
     });
+    if (!user) return null;
+    const { perms, stationIds } = await this.loadUserPermissions(userId, user.role);
+    return { ...user, perms, stationIds };
   }
 
   async forgotPassword(email: string) {
@@ -434,15 +468,109 @@ export class AuthService {
     return { message: 'Mot de passe réinitialisé avec succès' };
   }
 
+  async socialLogin(provider: 'google' | 'facebook', idToken: string) {
+    let socialId: string;
+    let email: string;
+    let firstName: string;
+    let lastName: string;
+    let avatar: string | undefined;
+
+    if (provider === 'google') {
+      // Essai 1 : userinfo (access token — flux web et mobile accessToken)
+      let data: any = null;
+      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (userInfoRes.ok) {
+        data = await userInfoRes.json();
+      } else {
+        // Essai 2 : tokeninfo (ID token JWT — flux mobile idToken)
+        const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+        if (!tokenInfoRes.ok) throw new UnauthorizedException('Token Google invalide');
+        data = await tokenInfoRes.json();
+        if (data.error_description) throw new UnauthorizedException('Token Google invalide');
+      }
+      if (!data?.sub) throw new UnauthorizedException('Token Google invalide');
+      socialId  = data.sub;
+      email     = data.email;
+      firstName = data.given_name  ?? data.name?.split(' ')[0] ?? '';
+      lastName  = data.family_name ?? data.name?.split(' ').slice(1).join(' ') ?? '';
+      avatar    = data.picture;
+    } else {
+      const res = await fetch(`https://graph.facebook.com/me?fields=id,email,first_name,last_name,picture.type(large)&access_token=${idToken}`);
+      if (!res.ok) throw new UnauthorizedException('Token Facebook invalide');
+      const data: any = await res.json();
+      if (data.error)  throw new UnauthorizedException('Token Facebook invalide');
+      socialId  = data.id;
+      email     = data.email ?? `fb_${data.id}@noemail.transpro.ci`;
+      firstName = data.first_name ?? '';
+      lastName  = data.last_name  ?? '';
+      avatar    = data.picture?.data?.url;
+    }
+
+    const idField = provider === 'google' ? 'googleId' : 'facebookId';
+
+    let user = await this.prisma.user.findFirst({
+      where: { [idField]: socialId },
+      include: { driver: { select: { id: true } } },
+    });
+
+    if (!user) {
+      user = await this.prisma.user.findUnique({
+        where: { email },
+        include: { driver: { select: { id: true } } },
+      });
+      if (user) {
+        await this.prisma.user.update({ where: { id: user.id }, data: { [idField]: socialId } });
+      }
+    }
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          firstName,
+          lastName,
+          [idField]: socialId,
+          role: 'PASSENGER' as any,
+          isVerified: true,
+          avatar,
+          lastLoginAt: new Date(),
+        },
+        include: { driver: { select: { id: true } } },
+      });
+    } else {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date(), ...(avatar ? { avatar } : {}) },
+      });
+    }
+
+    if (!user.isActive) throw new UnauthorizedException('Compte désactivé');
+
+    const { passwordHash: _p, totpSecret: _t, totpBackupCodes: _b, driver, ...safe } = user as any;
+    const driverId = driver?.id;
+    const tokens = await this.generateTokens(user.id, user.email, user.role as any, user.tenantId ?? undefined, driverId);
+    return { user: safe, ...tokens };
+  }
+
   private async generateTokens(
     userId: string,
     email: string,
     role: any,
     tenantId?: string,
+    driverId?: string,
   ): Promise<AuthTokens> {
-    // Charger les permissions RBAC pour le JWT
-    const perms = await this.loadUserPermissions(userId, role);
-    const payload: JwtPayload = { sub: userId, email, role, tenantId, perms };
+    const { perms, stationIds } = await this.loadUserPermissions(userId, role);
+    const payload: JwtPayload = {
+      sub: userId,
+      email,
+      role,
+      tenantId,
+      perms,
+      ...(stationIds.length > 0 ? { stationIds } : {}),
+      ...(driverId ? { driverId } : {}),
+    };
 
     const [accessToken, rawRefresh] = await Promise.all([
       this.jwt.signAsync(payload, {

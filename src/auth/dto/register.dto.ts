@@ -69,3 +69,14 @@ export class RefreshTokenDto {
   @IsNotEmpty()
   refreshToken: string;
 }
+
+export class SocialAuthDto {
+  @ApiProperty({ enum: ['google', 'facebook'] })
+  @IsEnum(['google', 'facebook'])
+  provider: 'google' | 'facebook';
+
+  @ApiProperty({ description: "ID token (Google) ou access token (Facebook)" })
+  @IsString()
+  @IsNotEmpty()
+  idToken: string;
+}

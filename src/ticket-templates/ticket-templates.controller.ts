@@ -13,19 +13,12 @@ import { UserRole, TenantPlan } from '@transpro/shared';
 
 @ApiTags('Modèles de tickets')
 @Controller({ path: 'ticket-templates', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
-@RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class TicketTemplatesController {
   constructor(private service: TicketTemplatesService) {}
 
-  @Post()
-  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
-  @ApiOperation({ summary: 'Créer un modèle' })
-  create(@CurrentUser('tenantId') tenantId: string, @Body() dto: CreateTicketTemplateDto) {
-    return this.service.create(tenantId, dto);
-  }
-
+  // Lecture : tous les plans (le template par défaut est créé pour toutes les compagnies)
   @Get()
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
   @ApiOperation({ summary: 'Lister les modèles' })
@@ -47,7 +40,19 @@ export class TicketTemplatesController {
     return this.service.findOne(tenantId, id);
   }
 
+  // Écriture : plan PROFESSIONAL ou ENTERPRISE requis
+  @Post()
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
+  @ApiOperation({ summary: 'Créer un modèle' })
+  create(@CurrentUser('tenantId') tenantId: string, @Body() dto: CreateTicketTemplateDto) {
+    return this.service.create(tenantId, dto);
+  }
+
   @Patch(':id')
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
   @ApiOperation({ summary: 'Mettre à jour un modèle' })
   update(
@@ -59,6 +64,8 @@ export class TicketTemplatesController {
   }
 
   @Patch(':id/set-default')
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
   @ApiOperation({ summary: 'Définir comme modèle par défaut' })
   setDefault(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string) {
@@ -66,6 +73,8 @@ export class TicketTemplatesController {
   }
 
   @Post(':id/duplicate')
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
   @ApiOperation({ summary: 'Dupliquer un modèle' })
   duplicate(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string) {
@@ -73,6 +82,8 @@ export class TicketTemplatesController {
   }
 
   @Delete(':id')
+  @UseGuards(PlanGuard)
+  @RequiresPlan(TenantPlan.PROFESSIONAL, TenantPlan.ENTERPRISE)
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
   @HttpCode(204)
   @ApiOperation({ summary: 'Supprimer un modèle' })

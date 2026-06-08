@@ -1,7 +1,7 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { BookingsService } from './bookings.service';
-import { CreateBookingDto, CreateGuichetBookingDto } from './dto/booking.dto';
+import { CreateBookingDto, CreateGuichetBookingDto, UpdateBookingStatusDto } from './dto/booking.dto';
 import { RateBookingDto } from './dto/rate-booking.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -71,6 +71,24 @@ export class BookingsController {
   @ApiOperation({ summary: 'Détail d\'une réservation' })
   findOne(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
     return this.bookings.findOne(id, tenantId);
+  }
+
+  @Post(':id/tickets/generate')
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
+  @ApiOperation({ summary: 'Générer les tickets manquants d\'une réservation confirmée' })
+  generateTickets(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.bookings.generateMissingTickets(id, tenantId);
+  }
+
+  @Patch(':id/status')
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
+  @ApiOperation({ summary: 'Modifier le statut d\'une réservation (admin/owner)' })
+  updateStatus(
+    @Param('id') id: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @Body() dto: UpdateBookingStatusDto,
+  ) {
+    return this.bookings.updateStatus(id, tenantId, dto.status);
   }
 
   @Delete(':id')

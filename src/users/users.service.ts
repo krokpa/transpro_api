@@ -80,7 +80,7 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id },
       data: dto,
-      select: { id: true, email: true, phone: true, firstName: true, lastName: true, role: true, preferredLang: true, avatar: true, updatedAt: true },
+      select: { id: true, email: true, phone: true, firstName: true, lastName: true, role: true, preferredLang: true, avatar: true, themeAccent: true, themeSidebar: true, updatedAt: true },
     });
   }
 
@@ -100,11 +100,50 @@ export class UsersService {
     return user ?? null;
   }
 
+  /**
+   * Permet à un utilisateur connecté via téléphone (compte guichet) de définir
+   * un vrai email et/ou un mot de passe, sans connaître son mot de passe actuel.
+   * Sécurisé car le JWT est requis (connexion par OTP préalable).
+   */
+  async setCredentials(userId: string, dto: { email?: string; password?: string }) {
+    if (!dto.email && !dto.password) {
+      throw new BadRequestException('Email ou mot de passe requis');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+
+    const updates: Record<string, unknown> = {};
+
+    if (dto.email) {
+      const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (existing && existing.id !== userId) {
+        throw new ConflictException('Cet email est déjà utilisé par un autre compte');
+      }
+      updates.email = dto.email;
+      updates.isVerified = true;
+    }
+
+    if (dto.password) {
+      updates.passwordHash = await bcrypt.hash(dto.password, 12);
+      // Invalider toutes les sessions existantes pour forcer une reconnexion propre
+      await this.prisma.refreshToken.deleteMany({ where: { userId } });
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: updates,
+      select: { id: true, firstName: true, lastName: true, email: true, phone: true, role: true, avatar: true },
+    });
+
+    return updated;
+  }
+
   async changePassword(id: string, currentPassword: string, newPassword: string) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Utilisateur introuvable');
 
-    const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    const isValid = user.passwordHash && await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isValid) throw new UnauthorizedException('Mot de passe actuel incorrect');
     if (newPassword.length < 8) throw new BadRequestException('Le nouveau mot de passe doit contenir au moins 8 caractères');
 

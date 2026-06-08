@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { UpdateUserDto, ChangePasswordDto, AddToTenantDto, InviteTeamMemberDto, UpdateRoleDto } from './dto/user.dto';
+import { UpdateUserDto, ChangePasswordDto, AddToTenantDto, InviteTeamMemberDto, UpdateRoleDto, SetCredentialsDto } from './dto/user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
@@ -91,9 +91,16 @@ export class UsersController {
 
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Changer son mot de passe' })
+  @ApiOperation({ summary: 'Changer son mot de passe (requiert le mot de passe actuel)' })
   changePassword(@CurrentUser('id') userId: string, @Body() dto: ChangePasswordDto) {
     return this.usersService.changePassword(userId, dto.currentPassword, dto.newPassword);
+  }
+
+  @Patch('set-credentials')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Définir email et/ou mot de passe — pour les comptes créés par téléphone (sans mot de passe connu)' })
+  setCredentials(@CurrentUser('id') userId: string, @Body() dto: SetCredentialsDto) {
+    return this.usersService.setCredentials(userId, dto);
   }
 
   @Post('device-token')

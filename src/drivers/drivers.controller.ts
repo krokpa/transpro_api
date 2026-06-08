@@ -15,16 +15,16 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { DriversService } from './drivers.service';
 import { CreateDriverDto, UpdateDriverDto } from './dto/driver.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '@transpro/shared';
+import { PERM } from '@transpro/shared';
 
 @ApiTags('Chauffeurs')
 @Controller({ path: 'drivers', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission(PERM.DRIVERS_MANAGE)
 @ApiBearerAuth()
-@Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
 export class DriversController {
   constructor(private driversService: DriversService) {}
 
@@ -60,6 +60,21 @@ export class DriversController {
   @ApiOperation({ summary: 'Désactiver un chauffeur' })
   remove(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
     return this.driversService.remove(id, tenantId);
+  }
+
+  @Post(':id/invite')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Envoyer / renvoyer le code OTP d\'activation au chauffeur' })
+  invite(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.driversService.invite(id, tenantId);
+  }
+
+  // ── Stats ──────────────────────────────────────────────────────────────────
+
+  @Get(':id/stats')
+  @ApiOperation({ summary: 'Statistiques de performance d\'un chauffeur' })
+  getStats(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.driversService.getStats(id, tenantId);
   }
 
   // ── Planning (trips) ───────────────────────────────────────────────────────

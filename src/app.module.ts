@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { RoutesModule } from './routes/routes.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { DriversModule } from './drivers/drivers.module';
+import { DriverSpaceModule } from './driver-space/driver-space.module';
 import { TripsModule } from './trips/trips.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -33,6 +34,8 @@ import { LuggageModule } from './luggage/luggage.module';
 import { RefundsModule } from './refunds/refunds.module';
 import { PushModule } from './push/push.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { ApiConsumersModule } from './api-consumers/api-consumers.module';
+import { PublicApiModule } from './public-api/public-api.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { PaymentRedirectController } from './payment-redirect.controller';
 
@@ -63,6 +66,7 @@ import { PaymentRedirectController } from './payment-redirect.controller';
     RoutesModule,
     VehiclesModule,
     DriversModule,
+    DriverSpaceModule,
     TripsModule,
     BookingsModule,
     PaymentsModule,
@@ -85,6 +89,8 @@ import { PaymentRedirectController } from './payment-redirect.controller';
     RefundsModule,
     PushModule,
     PermissionsModule,
+    ApiConsumersModule,
+    PublicApiModule,
   ],
 })
 export class AppModule implements NestModule {

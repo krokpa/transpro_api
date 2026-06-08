@@ -94,8 +94,8 @@ export class TripsService {
         route: { select: { name: true, originCity: { select: { name: true } }, destinationCity: { select: { name: true } } } },
         vehicle: { select: { plate: true, brand: true, model: true, advancedSeatManagement: true } },
         driver: { select: { firstName: true, lastName: true } },
-        departureStation: { select: { id: true, name: true, address: true, city: { select: { name: true } } } },
-        arrivalStation: { select: { id: true, name: true, address: true, city: { select: { name: true } } } },
+        departureStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
+        arrivalStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
         _count: { select: { bookings: true } },
       },
       orderBy: { departureAt: 'asc' },
@@ -110,8 +110,8 @@ export class TripsService {
         vehicle: true,
         driver: true,
         seats: { orderBy: { seatNumber: 'asc' } },
-        departureStation: { select: { id: true, name: true, address: true, city: { select: { name: true } } } },
-        arrivalStation: { select: { id: true, name: true, address: true, city: { select: { name: true } } } },
+        departureStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
+        arrivalStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
       },
     });
 
@@ -127,6 +127,33 @@ export class TripsService {
       orderBy: { seatNumber: 'asc' },
     });
     return seats;
+  }
+
+  async getLastLocation(tripId: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      select: {
+        id: true, status: true,
+        currentLat: true, currentLng: true,
+        currentHeading: true, currentSpeed: true,
+        locationUpdatedAt: true,
+      },
+    });
+    if (!trip) return { hasLocation: false };
+    if (trip.currentLat == null) return { hasLocation: false };
+    const ageMs = trip.locationUpdatedAt
+      ? Date.now() - trip.locationUpdatedAt.getTime()
+      : null;
+    return {
+      hasLocation: true,
+      tripId,
+      lat:              trip.currentLat,
+      lng:              trip.currentLng,
+      heading:          trip.currentHeading ?? 0,
+      speed:            trip.currentSpeed ?? 0,
+      locationUpdatedAt: trip.locationUpdatedAt,
+      isStale:          ageMs !== null && ageMs > 5 * 60 * 1000, // > 5 min
+    };
   }
 
   async updateStatus(id: string, tenantId: string, dto: UpdateTripStatusDto) {
@@ -157,7 +184,9 @@ export class TripsService {
         },
         vehicle: { select: { plate: true, brand: true, model: true } },
         driver: { select: { firstName: true, lastName: true } },
-        tenant: { select: { logo: true } },
+        tenant: { select: { logo: true, name: true, slug: true } },
+        departureStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true } },
+        arrivalStation:   { select: { id: true, name: true, address: true, latitude: true, longitude: true } },
       },
     });
 
@@ -364,8 +393,8 @@ export class TripsService {
         },
         vehicle: { select: { brand: true, model: true, capacity: true, advancedSeatManagement: true } },
         tenant: { select: { name: true, logo: true, slug: true } },
-        departureStation: { select: { id: true, name: true, address: true, city: { select: { name: true } } } },
-        arrivalStation: { select: { id: true, name: true, address: true, city: { select: { name: true } } } },
+        departureStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
+        arrivalStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
       },
       orderBy: { departureAt: 'asc' },
       take: limit,
@@ -447,8 +476,8 @@ export class TripsService {
         },
         vehicle: { select: { brand: true, model: true, capacity: true, advancedSeatManagement: true } },
         tenant: { select: { name: true, logo: true, slug: true } },
-        departureStation: { select: { id: true, name: true, address: true, city: { select: { name: true } } } },
-        arrivalStation: { select: { id: true, name: true, address: true, city: { select: { name: true } } } },
+        departureStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
+        arrivalStation: { select: { id: true, name: true, address: true, latitude: true, longitude: true, city: { select: { name: true } } } },
       },
       orderBy: [{ tripClass: 'asc' }, { departureAt: 'asc' }],
     });

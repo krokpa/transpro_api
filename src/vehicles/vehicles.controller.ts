@@ -14,16 +14,16 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { VehiclesService } from './vehicles.service';
 import { CreateVehicleDto, UpdateVehicleDto } from './dto/vehicle.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '@transpro/shared';
+import { PERM } from '@transpro/shared';
 
 @ApiTags('Véhicules')
 @Controller({ path: 'vehicles', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission(PERM.VEHICLES_MANAGE)
 @ApiBearerAuth()
-@Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
 export class VehiclesController {
   constructor(private vehiclesService: VehiclesService) {}
 

@@ -1,6 +1,12 @@
 import { IsArray, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, ArrayMaxSize, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PaymentMethod } from '@transpro/shared';
+import { BookingStatus, PaymentMethod } from '@transpro/shared';
+
+export class UpdateBookingStatusDto {
+  @ApiProperty({ enum: BookingStatus })
+  @IsEnum(BookingStatus)
+  status: BookingStatus;
+}
 
 export class CreateBookingDto {
   @ApiProperty()

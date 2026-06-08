@@ -13,6 +13,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { RealtimeService } from './realtime.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { SocketEvent } from '@transpro/shared';
 
 @WebSocketGateway({
@@ -35,6 +36,7 @@ export class RealtimeGateway
     private realtime: RealtimeService,
     private jwt: JwtService,
     private config: ConfigService,
+    private prisma: PrismaService,
   ) {}
 
   afterInit(server: Server) {
@@ -88,23 +90,54 @@ export class RealtimeGateway
     return { event: 'left', data: `trip:${data.tripId}` };
   }
 
-  // Rejoindre la room d'une compagnie (agents authentifiés)
-  // Driver broadcasts its GPS position → server fans out to all trip watchers.
+  // Driver broadcasts its GPS position → server validates, persists, fans out to all trip watchers.
   @SubscribeMessage(SocketEvent.LOCATION_UPDATE)
-  handleLocationUpdate(
+  async handleLocationUpdate(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { tripId: string; lat: number; lng: number; heading?: number; speed?: number },
   ) {
     if (!data?.tripId || data.lat == null || data.lng == null) return;
-    // Re-broadcast to everyone watching this trip (including the driver themselves).
-    this.server.to(`trip:${data.tripId}`).emit(SocketEvent.BUS_LOCATION, {
+
+    const user = client.data.user;
+
+    // Valider que l'émetteur est bien le chauffeur assigné à ce voyage
+    if (user?.driverId) {
+      const trip = await this.prisma.trip.findFirst({
+        where: { id: data.tripId, driverId: user.driverId },
+        select: { id: true },
+      });
+      if (!trip) {
+        this.logger.warn(`Location rejetée : driverId=${user.driverId} non assigné au trip=${data.tripId}`);
+        return;
+      }
+    } else if (user?.role && !['COMPANY_AGENT', 'COMPANY_OWNER', 'COMPANY_ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+      // Rejeter si le rôle n'est pas autorisé à émettre une position
+      return;
+    }
+
+    const payload = {
       tripId:  data.tripId,
       lat:     data.lat,
       lng:     data.lng,
       heading: data.heading ?? 0,
       speed:   data.speed   ?? 0,
       ts:      Date.now(),
-    });
+    };
+
+    // Persister la dernière position connue (non-bloquant)
+    this.prisma.trip.updateMany({
+      where: { id: data.tripId },
+      data: {
+        currentLat:        data.lat,
+        currentLng:        data.lng,
+        currentHeading:    data.heading ?? 0,
+        currentSpeed:      data.speed   ?? 0,
+        locationUpdatedAt: new Date(),
+      },
+    }).catch(() => {});
+
+    // Broadcaster à tous les observateurs du voyage
+    this.server.to(`trip:${data.tripId}`).emit(SocketEvent.BUS_LOCATION, payload);
   }
 
   @SubscribeMessage(SocketEvent.JOIN_COMPANY_ROOM)
