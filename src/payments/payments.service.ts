@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PushService } from '../push/push.service';
-import { SocketEvent, COMMISSION_RATE, NotificationType, PaymentMethod } from '@transpro/shared';
+import { SocketEvent, COMMISSION_RATE, GENIUS_PAY_RATE, NotificationType, PaymentMethod } from '@transpro/shared';
 import { generateReference } from '@transpro/shared';
 import axios from 'axios';
 import * as QRCode from 'qrcode';
@@ -82,8 +82,9 @@ export class PaymentsService {
       }
     }
 
+    const geniusPayFee     = Math.round(booking.totalAmount * GENIUS_PAY_RATE);
     const commissionAmount = Math.round(booking.totalAmount * COMMISSION_RATE);
-    const netAmount = booking.totalAmount - commissionAmount;
+    const netAmount        = booking.totalAmount - geniusPayFee - commissionAmount;
     const transactionId = generateReference('PAY');
     const appUrl = this.config.get('FRONTEND_URL') || this.config.get('APP_URL') || 'http://localhost:3000';
 
@@ -129,6 +130,7 @@ export class PaymentsService {
           method: 'GENIUS_PAY' as PaymentMethod,
           status: 'PROCESSING',
           transactionId,
+          geniusPayFee,
           commissionAmount,
           netAmount,
           providerRef: geniusRes.reference,
@@ -369,8 +371,9 @@ export class PaymentsService {
       throw new BadRequestException(`Paiement non complété (statut: ${gpStatus})`);
     }
 
+    const geniusPayFee     = Math.round(booking.totalAmount * GENIUS_PAY_RATE);
     const commissionAmount = Math.round(booking.totalAmount * COMMISSION_RATE);
-    const netAmount        = booking.totalAmount - commissionAmount;
+    const netAmount        = booking.totalAmount - geniusPayFee - commissionAmount;
     const paymentChannel   = this._extractChannel(gpData);
 
     // Créer ou mettre à jour le Payment en DB
@@ -391,6 +394,7 @@ export class PaymentsService {
           method:          'GENIUS_PAY' as any,
           status:          'PROCESSING',
           transactionId:   generateReference('PAY'),
+          geniusPayFee,
           commissionAmount,
           netAmount,
           providerRef:     geniusPayReference,

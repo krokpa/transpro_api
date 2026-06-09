@@ -217,6 +217,34 @@ export const createMockPrisma = () => ({
     groupBy: jest.fn(),
     aggregate: jest.fn(),
   },
+  settlement: {
+    findUnique: jest.fn(),
+    findFirst:  jest.fn(),
+    findMany:   jest.fn(),
+    create:     jest.fn(),
+    update:     jest.fn(),
+    count:      jest.fn(),
+  },
+  settlementItem: {
+    findMany:    jest.fn(),
+    createMany:  jest.fn(),
+  },
+  expense: {
+    findUnique: jest.fn(),
+    findFirst:  jest.fn(),
+    findMany:   jest.fn(),
+    create:     jest.fn(),
+    update:     jest.fn(),
+    count:      jest.fn(),
+  },
+  cashProvision: {
+    findUnique: jest.fn(),
+    findFirst:  jest.fn(),
+    findMany:   jest.fn(),
+    create:     jest.fn(),
+    update:     jest.fn(),
+    count:      jest.fn(),
+  },
   $transaction: jest.fn((fn: any) => {
     if (typeof fn === 'function') return fn(createMockPrisma());
     return Promise.all(fn);

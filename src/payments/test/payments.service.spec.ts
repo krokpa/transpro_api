@@ -118,8 +118,9 @@ describe('PaymentsService', () => {
         id: 'payment-1',
         bookingId: 'booking-1',
         amount: 12000,
+        geniusPayFee: 120,
         commissionAmount: 480,
-        netAmount: 11520,
+        netAmount: 11400,
       });
       mockPrisma.payment.update.mockResolvedValue({});
 
@@ -130,12 +131,14 @@ describe('PaymentsService', () => {
 
       await service.initiate('booking-1', 'user-1');
 
+      // geniusPayFee = 1% de 12000 = 120 ; commissionAmount = 4% = 480 ; netAmount = 12000 - 120 - 480 = 11400
       expect(mockPrisma.payment.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             amount: 12000,
+            geniusPayFee: 120,
             commissionAmount: 480,
-            netAmount: 11520,
+            netAmount: 11400,
           }),
         }),
       );

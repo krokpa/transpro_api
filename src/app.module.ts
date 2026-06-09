@@ -36,6 +36,9 @@ import { PushModule } from './push/push.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { ApiConsumersModule } from './api-consumers/api-consumers.module';
 import { PublicApiModule } from './public-api/public-api.module';
+import { SettlementsModule } from './settlements/settlements.module';
+import { ExpensesModule } from './expenses/expenses.module';
+import { CashProvisionsModule } from './cash-provisions/cash-provisions.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { PaymentRedirectController } from './payment-redirect.controller';
 
@@ -91,6 +94,9 @@ import { PaymentRedirectController } from './payment-redirect.controller';
     PermissionsModule,
     ApiConsumersModule,
     PublicApiModule,
+    SettlementsModule,
+    ExpensesModule,
+    CashProvisionsModule,
   ],
 })
 export class AppModule implements NestModule {

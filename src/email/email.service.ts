@@ -166,6 +166,36 @@ export class EmailService {
     });
   }
 
+  async sendSettlementPaid(to: string, params: {
+    firstName:   string;
+    companyName: string;
+    periodLabel: string;
+    netAmount:   number;
+    transferRef: string;
+    dashboardUrl: string;
+  }) {
+    await this.send({
+      to,
+      subject: `Reversement effectué — ${params.periodLabel} — TransPro CI`,
+      html: this.settlementPaidTemplate(params),
+    });
+  }
+
+  async sendSettlementFailed(to: string, params: {
+    firstName:    string;
+    companyName:  string;
+    periodLabel:  string;
+    netAmount:    number;
+    notes?:       string;
+    dashboardUrl: string;
+  }) {
+    await this.send({
+      to,
+      subject: `Reversement échoué — ${params.periodLabel} — TransPro CI`,
+      html: this.settlementFailedTemplate(params),
+    });
+  }
+
   private async send(mail: { to: string; subject: string; html: string }) {
     try {
       await this.transporter.sendMail({
@@ -415,6 +445,44 @@ export class EmailService {
       <p>Veuillez réessayer depuis votre espace abonnement :</p>
       <p style="text-align:center"><a href="${retryUrl}" class="btn">Réessayer le paiement</a></p>
       <p style="color:#6b7280;font-size:13px">Si le problème persiste, contactez notre support : <a href="mailto:support@transpro.ci">support@transpro.ci</a></p>
+    `);
+  }
+
+  private settlementPaidTemplate(p: {
+    firstName: string; companyName: string; periodLabel: string;
+    netAmount: number; transferRef: string; dashboardUrl: string;
+  }) {
+    const formatted = new Intl.NumberFormat('fr-CI').format(p.netAmount);
+    return this.base(`
+      <p>Bonjour <strong>${p.firstName}</strong>,</p>
+      <p>Bonne nouvelle ! Le reversement de votre compagnie <strong>${p.companyName}</strong> pour la période <strong>${p.periodLabel}</strong> a été effectué avec succès.</p>
+      <div class="info-box">
+        <div class="info-row"><span class="label">Compagnie</span><span class="value">${p.companyName}</span></div>
+        <div class="info-row"><span class="label">Période</span><span class="value">${p.periodLabel}</span></div>
+        <div class="info-row"><span class="label">Montant net reversé</span><span class="value">${formatted} FCFA</span></div>
+        <div class="info-row"><span class="label">Référence virement</span><span class="value">${p.transferRef}</span></div>
+      </div>
+      <p>Les fonds ont été envoyés sur le compte bancaire enregistré. Vérifiez votre relevé dans les prochaines 48h ouvrées.</p>
+      <p style="text-align:center"><a href="${p.dashboardUrl}" class="btn">Voir le détail</a></p>
+    `);
+  }
+
+  private settlementFailedTemplate(p: {
+    firstName: string; companyName: string; periodLabel: string;
+    netAmount: number; notes?: string; dashboardUrl: string;
+  }) {
+    const formatted = new Intl.NumberFormat('fr-CI').format(p.netAmount);
+    return this.base(`
+      <p>Bonjour <strong>${p.firstName}</strong>,</p>
+      <p>⚠️ Le reversement de <strong>${p.companyName}</strong> pour la période <strong>${p.periodLabel}</strong> n'a pas pu être effectué.</p>
+      <div class="info-box">
+        <div class="info-row"><span class="label">Période</span><span class="value">${p.periodLabel}</span></div>
+        <div class="info-row"><span class="label">Montant concerné</span><span class="value">${formatted} FCFA</span></div>
+        ${p.notes ? `<div class="info-row"><span class="label">Raison</span><span class="value">${p.notes}</span></div>` : ''}
+      </div>
+      <p>Merci de vérifier vos coordonnées bancaires et de les mettre à jour si nécessaire, puis de contacter notre équipe.</p>
+      <p style="text-align:center"><a href="${p.dashboardUrl}" class="btn">Accéder à mon espace</a></p>
+      <p style="color:#6b7280;font-size:13px">Support : <a href="mailto:support@transpro.ci">support@transpro.ci</a></p>
     `);
   }
 }
