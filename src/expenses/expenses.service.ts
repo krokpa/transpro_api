@@ -3,6 +3,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '@transpro/shared';
+import * as XLSX from 'xlsx';
+import { StatementOutput, buildPdfFromExpenses, CAT_LBL } from './expenses.pdf';
 
 @Injectable()
 export class ExpensesService {
@@ -190,6 +192,142 @@ export class ExpensesService {
       byCategory,
       expenseCount:   expenses.length,
       provisionCount: provisions.length,
+    };
+  }
+
+  // ── Export relevé caisse gare ────────────────────────────────────────────────
+
+  async exportStationStatement(
+    stationId: string,
+    tenantId: string,
+    from: string,
+    to: string,
+    format: 'pdf' | 'xlsx',
+  ): Promise<StatementOutput> {
+    const start = new Date(from + '-01');
+    const endD  = new Date(to + '-01');
+    endD.setMonth(endD.getMonth() + 1);
+    endD.setDate(0);
+    endD.setUTCHours(23, 59, 59, 999);
+
+    const station = await this.prisma.station.findFirst({
+      where: { id: stationId, tenantId },
+      select: { name: true },
+    });
+    if (!station) throw new NotFoundException('Gare introuvable');
+
+    const [expensesRaw, provisionsRaw, bookings] = await Promise.all([
+      this.prisma.expense.findMany({
+        where: { stationId, tenantId, status: 'APPROVED', date: { gte: start, lte: endD } },
+        include: {
+          approver:  { select: { firstName: true, lastName: true } },
+          submitter: { select: { firstName: true, lastName: true } },
+        },
+        orderBy: { date: 'asc' },
+      }),
+      this.prisma.cashProvision.findMany({
+        where: { stationId, tenantId, status: 'RECEIVED', receivedAt: { gte: start, lte: endD } },
+        orderBy: { receivedAt: 'asc' },
+      }),
+      this.prisma.booking.findMany({
+        where: {
+          soldByStationId: stationId,
+          tenantId,
+          status: { in: ['CONFIRMED', 'COMPLETED'] },
+          createdAt: { gte: start, lte: endD },
+        },
+        include: { payment: { select: { amount: true, method: true, status: true } } },
+      }),
+    ]);
+
+    const cashSales        = bookings.filter(b => b.payment?.method === 'CASH' && b.payment?.status === 'SUCCESS').reduce((s, b) => s + (b.payment?.amount ?? 0), 0);
+    const totalExpenses    = expensesRaw.reduce((s, e) => s + e.amount, 0);
+    const totalProvisions  = provisionsRaw.reduce((s, p) => s + p.amount, 0);
+    const estimatedBalance = cashSales + totalProvisions - totalExpenses;
+
+    const byCategory: Record<string, number> = {};
+    expensesRaw.forEach(e => { byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount; });
+
+    const period = from === to ? from : `${from} → ${to}`;
+    const stationName = station.name;
+
+    if (format === 'xlsx') {
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1 — Résumé
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+        ['Relevé de caisse', '', stationName],
+        ['Période', period, ''],
+        ['Généré le', new Date().toLocaleDateString('fr-FR'), ''],
+        [],
+        ['RÉSUMÉ'],
+        ['Ventes espèces (FCFA)',             cashSales],
+        ['Approvisionnements reçus (FCFA)',   totalProvisions],
+        ['Dépenses approuvées (FCFA)',        totalExpenses],
+        ['Solde estimé (FCFA)',               estimatedBalance],
+      ]), 'Résumé');
+
+      // Sheet 2 — Dépenses
+      const expHeaders = ['Date', 'Catégorie', 'Description', 'Montant (FCFA)', 'Soumis par', 'Approuvé par'];
+      const expRows = expensesRaw.map(e => [
+        new Date(e.date).toLocaleDateString('fr-FR'),
+        (CAT_LBL as any)[e.category] ?? e.category,
+        e.description,
+        e.amount,
+        e.submitter ? `${e.submitter.firstName} ${e.submitter.lastName}` : '',
+        e.approver  ? `${e.approver.firstName} ${e.approver.lastName}` : '',
+      ]);
+      expRows.push(['TOTAL', '', '', totalExpenses, '', '']);
+      const wsExp = XLSX.utils.aoa_to_sheet([expHeaders, ...expRows]);
+      wsExp['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 40 }, { wch: 16 }, { wch: 20 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(wb, wsExp, 'Dépenses');
+
+      // Sheet 3 — Approvisionnements
+      const provHeaders = ['Date réception', 'Motif', 'Notes', 'Montant (FCFA)'];
+      const provRows = provisionsRaw.map(p => [
+        p.receivedAt ? new Date(p.receivedAt).toLocaleDateString('fr-FR') : '',
+        p.reason ?? '',
+        p.notes  ?? '',
+        p.amount,
+      ]);
+      provRows.push(['TOTAL', '', '', totalProvisions]);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([provHeaders, ...provRows]), 'Approvisionnements');
+
+      // Sheet 4 — Répartition
+      const catHeaders = ['Catégorie', 'Montant (FCFA)', 'Part (%)'];
+      const catRows = Object.entries(byCategory).sort(([, a], [, b]) => b - a).map(([cat, amt]) => [
+        (CAT_LBL as any)[cat] ?? cat,
+        amt,
+        totalExpenses > 0 ? `${((amt / totalExpenses) * 100).toFixed(1)}%` : '0.0%',
+      ]);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([catHeaders, ...catRows]), 'Par catégorie');
+
+      const buffer = Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+      return {
+        buffer,
+        filename: `releve-caisse-${stationName.toLowerCase().replace(/\s/g, '-')}-${from}-${to}.xlsx`,
+        mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      };
+    }
+
+    const buffer = await buildPdfFromExpenses({
+      stationName,
+      period,
+      from,
+      to,
+      cashSales,
+      totalExpenses,
+      totalProvisions,
+      estimatedBalance,
+      byCategory,
+      expenses: expensesRaw,
+      provisions: provisionsRaw,
+    });
+
+    return {
+      buffer,
+      filename: `releve-caisse-${stationName.toLowerCase().replace(/\s/g, '-')}-${from}-${to}.pdf`,
+      mimetype: 'application/pdf',
     };
   }
 }

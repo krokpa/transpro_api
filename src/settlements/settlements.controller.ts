@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Patch, Post, Param, Query, Body, Req,
+  Controller, Get, Patch, Post, Param, Query, Body, Req, Res,
   UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -107,5 +107,25 @@ export class SettlementsController {
   ) {
     if (!req.user.tenantId) throw new ForbiddenException();
     return this.service.submitBankDetails(id, dto, req.user.tenantId);
+  }
+
+  @Get('export/statement')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Exporter le relevé de reversements (PDF ou XLSX)' })
+  async exportStatement(
+    @Req() req: any,
+    @Res() reply: any,
+    @Query('from')    from:   string,
+    @Query('to')      to:     string,
+    @Query('format')  format: 'pdf' | 'xlsx' = 'pdf',
+    @Query('tenantId') tenantId?: string,
+  ) {
+    const tId = req.user.role === 'SUPER_ADMIN' ? tenantId! : req.user.tenantId;
+    if (!tId) throw new ForbiddenException();
+    const result = await this.service.exportStatement(tId, from ?? new Date().toISOString().slice(0, 7), to ?? new Date().toISOString().slice(0, 7), format);
+    reply.header('Content-Type', result.mimetype);
+    reply.header('Content-Disposition', `attachment; filename="${result.filename}"`);
+    reply.send(result.buffer);
   }
 }

@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Body, Param, Query, Req, UseGuards,
+  Controller, Get, Post, Patch, Body, Param, Query, Req, Res, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ExpensesService } from './expenses.service';
@@ -50,6 +50,25 @@ export class ExpensesController {
     @Req()              req: any,
   ) {
     return this.service.stationSummary(stationId, req.user.tenantId, month);
+  }
+
+  @Get('station/:stationId/export')
+  @UseGuards(PermissionsGuard)
+  @RequirePermission(PERM.REPORTS_STATION)
+  @ApiOperation({ summary: 'Exporter le relevé de caisse d\'une gare (PDF ou XLSX)' })
+  async exportStationStatement(
+    @Param('stationId') stationId: string,
+    @Req()              req: any,
+    @Res()              reply: any,
+    @Query('from')      from: string,
+    @Query('to')        to: string,
+    @Query('format')    format: 'pdf' | 'xlsx' = 'pdf',
+  ) {
+    const now = new Date().toISOString().slice(0, 7);
+    const result = await this.service.exportStationStatement(stationId, req.user.tenantId, from ?? now, to ?? now, format);
+    reply.header('Content-Type', result.mimetype);
+    reply.header('Content-Disposition', `attachment; filename="${result.filename}"`);
+    reply.send(result.buffer);
   }
 
   @Get(':id')

@@ -4,6 +4,79 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@transpro/shared';
+import * as XLSX from 'xlsx';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const PDFDoc = require('pdfkit') as typeof import('pdfkit');
+
+// ─── Shared PDF helpers (inline, minimal) ────────────────────────────────────
+const M = 40; const CW = 515; const DARK = '#1e293b'; const GR = '#6b7280'; const LT = '#f8fafc';
+function fmtXOF(n: number) { return `${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`; }
+function fmtD(d: Date | string) { return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
+function pdfHdr(doc: any, title: string, sub: string, company: string) {
+  doc.fillColor('#f05a1a').rect(M, 30, CW, 3).fill();
+  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(15).text(company, M, 44, { width: 260, lineBreak: false });
+  doc.fillColor('#f05a1a').font('Helvetica-Bold').fontSize(11).text(title, M + 255, 46, { width: 260, align: 'right', lineBreak: false });
+  doc.fillColor(GR).font('Helvetica').fontSize(9).text(sub, M, 67, { width: 300, lineBreak: false })
+    .text(`Généré le ${fmtD(new Date())}`, M + 255, 67, { width: 260, align: 'right', lineBreak: false });
+  doc.moveTo(M, 83).lineTo(M + CW, 83).strokeColor('#e2e8f0').lineWidth(1).stroke();
+  return 96;
+}
+function pdfTH(doc: any, cols: { t: string; w: number }[], y: number) {
+  doc.fillColor(DARK).rect(M, y, CW, 20).fill();
+  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(7);
+  let x = M; for (const c of cols) { doc.text(c.t.toUpperCase(), x + 5, y + 6, { width: c.w - 10, lineBreak: false }); x += c.w; }
+  return y + 20;
+}
+function pdfTR(doc: any, cells: string[], cols: { t: string; w: number }[], y: number, even: boolean) {
+  if (even) doc.fillColor(LT).rect(M, y, CW, 18).fill();
+  doc.fillColor('#374151').font('Helvetica').fontSize(7.5);
+  let x = M; for (let i = 0; i < cols.length; i++) { doc.text(cells[i] ?? '', x + 5, y + 4, { width: cols[i].w - 10, lineBreak: false, ellipsis: true }); x += cols[i].w; }
+  doc.moveTo(M, y + 17.5).lineTo(M + CW, y + 17.5).strokeColor('#f1f5f9').lineWidth(0.5).stroke();
+  return y + 18;
+}
+function pdfTotal(doc: any, cells: string[], cols: { t: string; w: number }[], y: number) {
+  doc.fillColor(DARK).rect(M, y, CW, 21).fill();
+  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(8);
+  let x = M; for (let i = 0; i < cols.length; i++) { doc.text(cells[i] ?? '', x + 5, y + 6, { width: cols[i].w - 10, lineBreak: false }); x += cols[i].w; }
+  return y + 21;
+}
+function pdfKpiRow(doc: any, kpis: { label: string; value: string; sub?: string }[], y: number) {
+  const n = kpis.length; const bw = Math.floor((CW - 8 * (n - 1)) / n);
+  kpis.forEach((k, i) => {
+    const x = M + i * (bw + 8);
+    doc.fillColor('#f1f5f9').roundedRect(x, y, bw, 50, 5).fill();
+    doc.fillColor(DARK).font('Helvetica-Bold').fontSize(12).text(k.value, x + 8, y + 8, { width: bw - 16, lineBreak: false });
+    doc.fillColor(GR).font('Helvetica').fontSize(7.5).text(k.label, x + 8, y + 26, { width: bw - 16, lineBreak: false });
+    if (k.sub) doc.fillColor('#f05a1a').font('Helvetica').fontSize(7).text(k.sub, x + 8, y + 38, { width: bw - 16, lineBreak: false });
+  });
+  return y + 64;
+}
+function pdfSection(doc: any, title: string, y: number) {
+  doc.fillColor('#f05a1a').font('Helvetica-Bold').fontSize(9).text(title.toUpperCase(), M, y, { width: CW });
+  doc.moveTo(M, y + 14).lineTo(M + CW, y + 14).strokeColor('#fed7aa').lineWidth(1).stroke();
+  return y + 22;
+}
+async function buildPdf(fn: (doc: any) => void): Promise<Buffer> {
+  const doc = new PDFDoc({ margin: M, bufferPages: true, size: 'A4' });
+  const chunks: Buffer[] = [];
+  const done = new Promise<Buffer>((res, rej) => {
+    doc.on('data', (c: Buffer) => chunks.push(c));
+    doc.on('end', () => res(Buffer.concat(chunks)));
+    doc.on('error', rej);
+  });
+  fn(doc);
+  const rng = doc.bufferedPageRange();
+  for (let i = 0; i < rng.count; i++) {
+    doc.switchToPage(rng.start + i);
+    doc.fillColor(GR).font('Helvetica').fontSize(7.5).text(
+      `TransPro CI  ·  Page ${i + 1} / ${rng.count}`,
+      M, doc.page.height - 26, { width: CW, align: 'center', lineBreak: false },
+    );
+  }
+  doc.end();
+  return done;
+}
+export interface StatementOutput { buffer: Buffer; filename: string; mimetype: string; }
 
 @Injectable()
 export class SettlementsService {
@@ -278,6 +351,153 @@ export class SettlementsService {
 
     this.logger.log(`Manual settlement trigger by ${adminId} for tenant ${tenantId}, ${year}-${String(month).padStart(2, '0')}`);
     return this.computeForTenant(tenantId, periodStart, periodEnd);
+  }
+
+  // ── Export relevé compagnie ──────────────────────────────────────────────────
+
+  async exportStatement(
+    tenantId: string,
+    from: string,
+    to: string,
+    format: 'pdf' | 'xlsx',
+  ): Promise<StatementOutput> {
+    const periodStart = new Date(from + '-01');
+    const periodEnd   = new Date(to + '-01');
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    periodEnd.setDate(0); // dernier jour du mois "to"
+
+    const [tenant, settlements] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { name: true, sigle: true, phone: true },
+      }),
+      this.prisma.settlement.findMany({
+        where: {
+          tenantId,
+          periodStart: { gte: new Date(from + '-01') },
+          periodEnd:   { lte: new Date(to + '-01T23:59:59') },
+        },
+        orderBy: { periodStart: 'asc' },
+      }),
+    ]);
+
+    const company = (tenant as any)?.sigle ?? tenant?.name ?? 'Compagnie';
+    const period  = from === to ? from : `${from} → ${to}`;
+
+    const totalGross = settlements.reduce((s, r) => s + r.totalAmount, 0);
+    const totalFees  = settlements.reduce((s, r) => s + r.geniusPayFees, 0);
+    const totalComm  = settlements.reduce((s, r) => s + r.commissions, 0);
+    const totalNet   = settlements.reduce((s, r) => s + r.netAmount, 0);
+
+    const STATUS_LBL: Record<string, string> = {
+      PENDING: 'En attente', PROCESSING: 'En cours', PAID: 'Payé', FAILED: 'Échoué',
+    };
+    const MONTH_FR = ['Janv.','Févr.','Mars','Avr.','Mai','Juin','Juil.','Août','Sept.','Oct.','Nov.','Déc.'];
+    const periodLabel = (s: any) => {
+      const d = new Date(s.periodStart);
+      return `${MONTH_FR[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    };
+
+    if (format === 'xlsx') {
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1 — Résumé
+      const summaryData = [
+        ['Relevé de reversements', '', '', company],
+        ['Période', period, '', ''],
+        ['Généré le', new Date().toLocaleDateString('fr-FR'), '', ''],
+        [],
+        ['RÉSUMÉ'],
+        ['Total brut encaissé (Genius Pay)', totalGross, 'FCFA', ''],
+        ['Frais Genius Pay (1%)',             totalFees,  'FCFA', `${((totalFees / (totalGross || 1)) * 100).toFixed(2)}%`],
+        ['Commission TransPro (4%)',          totalComm,  'FCFA', `${((totalComm / (totalGross || 1)) * 100).toFixed(2)}%`],
+        ['Montant net reversé',               totalNet,   'FCFA', ''],
+        [],
+        ['Nb reversements', settlements.length, '', ''],
+        ['Nb reversements payés', settlements.filter(s => s.status === 'PAID').length, '', ''],
+      ];
+      const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+      wsSummary['!cols'] = [{ wch: 38 }, { wch: 18 }, { wch: 10 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'Résumé');
+
+      // Sheet 2 — Détail
+      const headers = ['Période', 'Nbre transactions', 'Total brut (FCFA)', 'Frais Genius Pay (FCFA)', 'Commission (FCFA)', 'Net reversé (FCFA)', 'Statut', 'Réf. virement'];
+      const rows = settlements.map(s => [
+        periodLabel(s),
+        s.itemCount,
+        s.totalAmount,
+        s.geniusPayFees,
+        s.commissions,
+        s.netAmount,
+        STATUS_LBL[s.status] ?? s.status,
+        s.transferRef ?? '',
+      ]);
+      rows.push(['TOTAL', settlements.reduce((a, s) => a + s.itemCount, 0), totalGross, totalFees, totalComm, totalNet, '', '']);
+      const wsDetail = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      wsDetail['!cols'] = [{ wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(wb, wsDetail, 'Détail reversements');
+
+      const buffer = Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+      return {
+        buffer,
+        filename: `releve-compagnie-${company.toLowerCase().replace(/\s/g, '-')}-${from}-${to}.xlsx`,
+        mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      };
+    }
+
+    // ── PDF ──────────────────────────────────────────────────────────────────────
+    const cols = [
+      { t: 'Période',      w: 72 },
+      { t: 'Nb trans.',    w: 52 },
+      { t: 'Total brut',   w: 90 },
+      { t: 'Frais GP',     w: 76 },
+      { t: 'Commission',   w: 76 },
+      { t: 'Net reversé',  w: 90 },
+      { t: 'Statut',       w: 59 },
+    ];
+
+    const buffer = await buildPdf((doc) => {
+      let y = pdfHdr(doc, 'RELEVÉ DE REVERSEMENTS', `Période : ${period}`, company);
+
+      y = pdfKpiRow(doc, [
+        { label: 'Total brut encaissé', value: fmtXOF(totalGross) },
+        { label: 'Frais Genius Pay (1%)', value: fmtXOF(totalFees), sub: `${((totalFees / (totalGross || 1)) * 100).toFixed(1)}% du brut` },
+        { label: 'Commission TransPro (4%)', value: fmtXOF(totalComm), sub: `${((totalComm / (totalGross || 1)) * 100).toFixed(1)}% du brut` },
+        { label: 'Net reversé', value: fmtXOF(totalNet) },
+      ], y + 8);
+
+      y = pdfSection(doc, 'Détail par période', y + 6);
+      y = pdfTH(doc, cols, y);
+
+      settlements.forEach((s, i) => {
+        if (y > doc.page.height - 80) { doc.addPage(); y = 40; }
+        y = pdfTR(doc, [
+          periodLabel(s),
+          String(s.itemCount),
+          fmtXOF(s.totalAmount),
+          fmtXOF(s.geniusPayFees),
+          fmtXOF(s.commissions),
+          fmtXOF(s.netAmount),
+          STATUS_LBL[s.status] ?? s.status,
+        ], cols, y, i % 2 === 0);
+      });
+
+      pdfTotal(doc, [
+        'TOTAL',
+        String(settlements.reduce((a, s) => a + s.itemCount, 0)),
+        fmtXOF(totalGross),
+        fmtXOF(totalFees),
+        fmtXOF(totalComm),
+        fmtXOF(totalNet),
+        '',
+      ], cols, y);
+    });
+
+    return {
+      buffer,
+      filename: `releve-compagnie-${company.toLowerCase().replace(/\s/g, '-')}-${from}-${to}.pdf`,
+      mimetype: 'application/pdf',
+    };
   }
 
   // ── Notifications privées ────────────────────────────────────────────────────
