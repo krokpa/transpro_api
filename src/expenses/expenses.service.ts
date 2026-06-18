@@ -5,10 +5,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '@transpro/shared';
 import * as XLSX from 'xlsx';
 import { StatementOutput, buildPdfFromExpenses, CAT_LBL } from './expenses.pdf';
+import { StationCashPeriodsService } from '../station-cash-periods/station-cash-periods.service';
 
 @Injectable()
 export class ExpensesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cashPeriods: StationCashPeriodsService,
+  ) {}
 
   async create(dto: {
     stationId:   string;
@@ -103,7 +107,7 @@ export class ExpensesService {
       throw new BadRequestException(`Impossible d'approuver une dépense en statut "${expense.status}"`);
     }
 
-    return this.prisma.expense.update({
+    const updated = await this.prisma.expense.update({
       where: { id },
       data: {
         status:      'APPROVED',
@@ -118,6 +122,10 @@ export class ExpensesService {
         approver:  { select: { id: true, firstName: true, lastName: true } },
       },
     });
+
+    const d = new Date(expense.date);
+    this.cashPeriods.recalculate(expense.stationId, expense.tenantId, d.getUTCFullYear(), d.getUTCMonth() + 1).catch(() => {});
+    return updated;
   }
 
   async reject(id: string, reason: string, user: any) {
@@ -128,7 +136,7 @@ export class ExpensesService {
       throw new BadRequestException(`Impossible de rejeter une dépense en statut "${expense.status}"`);
     }
 
-    return this.prisma.expense.update({
+    const updated = await this.prisma.expense.update({
       where: { id },
       data: {
         status:         'REJECTED',
@@ -142,6 +150,10 @@ export class ExpensesService {
         approver:  { select: { id: true, firstName: true, lastName: true } },
       },
     });
+
+    const d = new Date(expense.date);
+    this.cashPeriods.recalculate(expense.stationId, expense.tenantId, d.getUTCFullYear(), d.getUTCMonth() + 1).catch(() => {});
+    return updated;
   }
 
   async stationSummary(stationId: string, tenantId: string, month?: string) {

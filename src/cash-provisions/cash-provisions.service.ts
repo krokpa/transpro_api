@@ -3,10 +3,14 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '@transpro/shared';
+import { StationCashPeriodsService } from '../station-cash-periods/station-cash-periods.service';
 
 @Injectable()
 export class CashProvisionsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cashPeriods: StationCashPeriodsService,
+  ) {}
 
   private async assertStation(stationId: string, tenantId: string) {
     const station = await this.prisma.station.findFirst({
@@ -116,10 +120,14 @@ export class CashProvisionsService {
     if (prov.status !== 'SENT') {
       throw new BadRequestException(`Statut actuel "${prov.status}" — les fonds doivent être envoyés d'abord`);
     }
-    return this.update(id, user.tenantId, {
+    const updated = await this.update(id, user.tenantId, {
       status:     'RECEIVED',
       receivedAt: new Date(),
     });
+
+    const now = new Date();
+    this.cashPeriods.recalculate(prov.stationId, prov.tenantId, now.getFullYear(), now.getMonth() + 1).catch(() => {});
+    return updated;
   }
 
   async reject(id: string, reason: string, user: any) {

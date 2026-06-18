@@ -2,7 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ExpensesService } from '../expenses.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StationCashPeriodsService } from '../../station-cash-periods/station-cash-periods.service';
 import { createMockPrisma } from '../../common/test/mock-prisma';
+
+const mockCashPeriods = { recalculate: jest.fn().mockResolvedValue(undefined) };
 
 const mockPrisma = createMockPrisma();
 
@@ -43,7 +46,8 @@ describe('ExpensesService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ExpensesService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: PrismaService,              useValue: mockPrisma      },
+        { provide: StationCashPeriodsService,  useValue: mockCashPeriods },
       ],
     }).compile();
 
