@@ -160,4 +160,16 @@ export class TenantsController {
   ) {
     return this.tenantsService.getAnalytics(tenantId, period);
   }
+
+  @Get('me/setup-progress')
+  @ApiBearerAuth()
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @ApiOperation({ summary: 'Progression de la configuration — guide étape par étape' })
+  getSetupProgress(
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.tenantsService.getSetupProgress(tenantId, userId, userRole);
+  }
 }

@@ -639,4 +639,211 @@ export class TenantsService {
 
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
+
+  // ─── Setup Progress ────────────────────────────────────────────────────────
+
+  async getSetupProgress(tenantId: string, userId: string, userRole: string) {
+    if (userRole === UserRole.COMPANY_OWNER || userRole === UserRole.COMPANY_ADMIN) {
+      return this.computeOwnerProgress(tenantId);
+    }
+    if (userRole === UserRole.COMPANY_AGENT) {
+      return this.computeAgentProgress(tenantId, userId);
+    }
+    return { role: userRole, overall: 100, isComplete: true, milestoneReached: 'OPERATIONAL', nextStep: null, steps: [] };
+  }
+
+  private async computeOwnerProgress(tenantId: string) {
+    const [tenant, stationCount, vehicleCount, driverCount, routeCount, tripCount, bookingCount, paymentCount] =
+      await Promise.all([
+        this.prisma.tenant.findUnique({
+          where: { id: tenantId },
+          select: { logo: true, address: true, phone: true },
+        }),
+        this.prisma.station.count({ where: { tenantId, isActive: true } }),
+        this.prisma.vehicle.count({ where: { tenantId, status: 'ACTIVE' } }),
+        this.prisma.driver.count({ where: { tenantId } }),
+        this.prisma.route.count({ where: { tenantId, isActive: true } }),
+        this.prisma.trip.count({ where: { tenantId } }),
+        this.prisma.booking.count({ where: { tenantId } }),
+        this.prisma.payment.count({ where: { tenantId, status: 'SUCCESS' } }),
+      ]);
+
+    const companyOk  = !!(tenant?.logo && tenant?.address && tenant?.phone);
+    const stationOk  = stationCount  > 0;
+    const vehicleOk  = vehicleCount  > 0;
+    const driverOk   = driverCount   > 0;
+    const routeOk    = routeCount    > 0;
+    const tripOk     = tripCount     > 0;
+    const bookingOk  = bookingCount  > 0;
+    const paymentOk  = paymentCount  > 0;
+
+    const steps = [
+      {
+        id: 'company_info',
+        title: 'Informations société',
+        description: 'Logo, contact et adresse de votre compagnie',
+        status: companyOk ? 'COMPLETED' : 'PENDING',
+        percentage: 10,
+        icon: 'business',
+        route: '/owner/profile',
+        action: 'Compléter le profil',
+        blockedReason: null,
+        blockedAction: null,
+        blockedRoute: null,
+      },
+      {
+        id: 'first_station',
+        title: 'Première gare',
+        description: 'Créez au moins un point de départ ou d\'arrivée',
+        status: stationOk ? 'COMPLETED' : 'PENDING',
+        percentage: 15,
+        icon: 'location_city',
+        route: '/owner/stations',
+        action: 'Créer une gare',
+        blockedReason: null,
+        blockedAction: null,
+        blockedRoute: null,
+      },
+      {
+        id: 'first_vehicle',
+        title: 'Premier véhicule',
+        description: 'Ajoutez un bus ou minibus à votre flotte',
+        status: vehicleOk ? 'COMPLETED' : 'PENDING',
+        percentage: 15,
+        icon: 'directions_bus',
+        route: '/owner/fleet',
+        action: 'Ajouter un véhicule',
+        blockedReason: null,
+        blockedAction: null,
+        blockedRoute: null,
+      },
+      {
+        id: 'first_driver',
+        title: 'Premier chauffeur',
+        description: 'Enregistrez un chauffeur dans votre équipe',
+        status: driverOk ? 'COMPLETED' : 'PENDING',
+        percentage: 10,
+        icon: 'person',
+        route: '/owner/drivers',
+        action: 'Ajouter un chauffeur',
+        blockedReason: null,
+        blockedAction: null,
+        blockedRoute: null,
+      },
+      {
+        id: 'first_route',
+        title: 'Première ligne',
+        description: 'Définissez un itinéraire entre deux villes',
+        status: routeOk ? 'COMPLETED' : 'PENDING',
+        percentage: 15,
+        icon: 'alt_route',
+        route: '/owner/routes',
+        action: 'Créer une ligne',
+        blockedReason: null,
+        blockedAction: null,
+        blockedRoute: null,
+      },
+      {
+        id: 'first_trip',
+        title: 'Premier voyage',
+        description: 'Planifiez votre premier départ',
+        status: tripOk    ? 'COMPLETED'
+               : (vehicleOk && routeOk) ? 'PENDING'
+               : 'BLOCKED',
+        percentage: 20,
+        icon: 'departure_board',
+        route: '/owner/trips',
+        action: 'Créer un voyage',
+        blockedReason: !vehicleOk && !routeOk ? 'Ajoutez d\'abord un véhicule et une ligne'
+                     : !vehicleOk             ? 'Ajoutez d\'abord un véhicule'
+                     : !routeOk              ? 'Créez d\'abord une ligne'
+                     : null,
+        blockedAction: !vehicleOk ? 'Ajouter un véhicule' : !routeOk ? 'Créer une ligne' : null,
+        blockedRoute:  !vehicleOk ? '/owner/fleet'        : !routeOk ? '/owner/routes'   : null,
+      },
+      {
+        id: 'first_booking',
+        title: 'Première réservation',
+        description: 'Recevez ou effectuez la première vente',
+        status: bookingOk ? 'COMPLETED' : tripOk ? 'PENDING' : 'BLOCKED',
+        percentage: 10,
+        icon: 'confirmation_num',
+        route: null,
+        action: null,
+        blockedReason: !tripOk ? 'Vous devez d\'abord créer un voyage' : null,
+        blockedAction: !tripOk ? 'Créer un voyage' : null,
+        blockedRoute:  !tripOk ? '/owner/trips'   : null,
+      },
+      {
+        id: 'first_payment',
+        title: 'Premier paiement',
+        description: 'Encaissez votre premier passager',
+        status: paymentOk ? 'COMPLETED' : bookingOk ? 'PENDING' : 'BLOCKED',
+        percentage: 5,
+        icon: 'payments',
+        route: null,
+        action: null,
+        blockedReason: !bookingOk ? 'Aucune réservation reçue pour le moment' : null,
+        blockedAction: null,
+        blockedRoute: null,
+      },
+    ];
+
+    const overall    = steps.reduce((s, step) => step.status === 'COMPLETED' ? s + step.percentage : s, 0);
+    const nextStep   = steps.find((s) => s.status !== 'COMPLETED') ?? null;
+    const milestone  = overall >= 100 ? 'OPERATIONAL'
+                     : overall >= 75  ? 'ALMOST_READY'
+                     : overall >= 50  ? 'ADVANCED'
+                     : overall > 0    ? 'STARTED'
+                     : 'NOT_STARTED';
+
+    return { role: 'COMPANY_OWNER', overall, isComplete: overall >= 100, milestoneReached: milestone, nextStep, steps };
+  }
+
+  private async computeAgentProgress(tenantId: string, userId: string) {
+    const [stationCount, bookingCount] = await Promise.all([
+      this.prisma.userStation.count({ where: { userId } }),
+      this.prisma.booking.count({
+        where: { tenantId, soldByStation: { userStations: { some: { userId } } } },
+      }),
+    ]);
+
+    const stationOk = stationCount > 0;
+    const saleOk    = bookingCount > 0;
+
+    const steps = [
+      {
+        id: 'station_assigned',
+        title: 'Affectation à une gare',
+        description: 'Vous devez être affecté à une gare par votre responsable',
+        status: stationOk ? 'COMPLETED' : 'BLOCKED',
+        percentage: 50,
+        icon: 'location_city',
+        route: null,
+        action: null,
+        blockedReason: !stationOk ? 'Demandez à votre responsable de vous affecter à une gare' : null,
+        blockedAction: null,
+        blockedRoute: null,
+      },
+      {
+        id: 'first_sale',
+        title: 'Première vente',
+        description: 'Effectuez votre première vente au guichet',
+        status: saleOk ? 'COMPLETED' : stationOk ? 'PENDING' : 'BLOCKED',
+        percentage: 50,
+        icon: 'point_of_sale',
+        route: '/agent/guichet',
+        action: 'Ouvrir le guichet',
+        blockedReason: !stationOk ? 'Vous n\'êtes pas encore affecté à une gare' : null,
+        blockedAction: null,
+        blockedRoute: null,
+      },
+    ];
+
+    const overall   = steps.reduce((s, step) => step.status === 'COMPLETED' ? s + step.percentage : s, 0);
+    const nextStep  = steps.find((s) => s.status !== 'COMPLETED') ?? null;
+    const milestone = overall >= 100 ? 'OPERATIONAL' : overall > 0 ? 'STARTED' : 'NOT_STARTED';
+
+    return { role: 'COMPANY_AGENT', overall, isComplete: overall >= 100, milestoneReached: milestone, nextStep, steps };
+  }
 }
