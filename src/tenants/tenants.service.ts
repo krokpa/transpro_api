@@ -1,6 +1,7 @@
 ﻿import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto, UpdateTenantDto } from './dto/tenant.dto';
+import { UpdateDocumentBrandingDto } from './dto/document-branding.dto';
 import { UserRole } from '@transpro/shared';
 import dayjs from 'dayjs';
 
@@ -207,6 +208,25 @@ export class TenantsService {
     return this.prisma.tenant.update({
       where: { id },
       data: dto,
+    });
+  }
+
+  async updateDocumentBranding(tenantId: string, dto: UpdateDocumentBrandingDto) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { settings: true },
+    });
+    if (!tenant) throw new NotFoundException('Tenant introuvable');
+
+    const current = (tenant.settings as Record<string, unknown>) ?? {};
+    const documentBranding: Record<string, unknown> = { logoPosition: dto.logoPosition };
+    if (dto.watermarkOpacity !== undefined) documentBranding.watermarkOpacity = dto.watermarkOpacity;
+    if (dto.footerText !== undefined) documentBranding.footerText = dto.footerText;
+
+    return this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { settings: { ...current, documentBranding } as any },
+      select: { id: true, settings: true },
     });
   }
 

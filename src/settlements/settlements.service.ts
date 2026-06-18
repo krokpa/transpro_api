@@ -5,19 +5,25 @@ import { EmailService } from '../email/email.service';
 import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@transpro/shared';
 import * as XLSX from 'xlsx';
+import { DocumentBrandingSettings, extractBranding, parseLogo, drawHeaderLogo, applyWatermark } from '../common/pdf-branding.helper';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDoc = require('pdfkit') as typeof import('pdfkit');
 
 // ─── Shared PDF helpers (inline, minimal) ────────────────────────────────────
 const M = 40; const CW = 515; const DARK = '#1e293b'; const GR = '#6b7280'; const LT = '#f8fafc';
+type PdfBranding = { logo: Buffer | null; settings: DocumentBrandingSettings };
 function fmtXOF(n: number) { return `${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`; }
 function fmtD(d: Date | string) { return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
-function pdfHdr(doc: any, title: string, sub: string, company: string) {
+function pdfHdr(doc: any, title: string, sub: string, company: string, logoBuffer?: Buffer | null) {
   doc.fillColor('#f05a1a').rect(M, 30, CW, 3).fill();
-  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(15).text(company, M, 44, { width: 260, lineBreak: false });
+  const xOff = logoBuffer ? drawHeaderLogo(doc, logoBuffer, 32) : 0;
+  const tw = 260 - xOff;
+  const nameY = logoBuffer ? 40 : 44;
+  const subY  = logoBuffer ? 57 : 67;
+  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(15).text(company, M + xOff, nameY, { width: tw, lineBreak: false });
   doc.fillColor('#f05a1a').font('Helvetica-Bold').fontSize(11).text(title, M + 255, 46, { width: 260, align: 'right', lineBreak: false });
-  doc.fillColor(GR).font('Helvetica').fontSize(9).text(sub, M, 67, { width: 300, lineBreak: false })
-    .text(`Généré le ${fmtD(new Date())}`, M + 255, 67, { width: 260, align: 'right', lineBreak: false });
+  doc.fillColor(GR).font('Helvetica').fontSize(9).text(sub, M + xOff, subY, { width: 300 - xOff, lineBreak: false })
+    .text(`Généré le ${fmtD(new Date())}`, M + 255, subY, { width: 260, align: 'right', lineBreak: false });
   doc.moveTo(M, 83).lineTo(M + CW, 83).strokeColor('#e2e8f0').lineWidth(1).stroke();
   return 96;
 }
@@ -56,7 +62,7 @@ function pdfSection(doc: any, title: string, y: number) {
   doc.moveTo(M, y + 14).lineTo(M + CW, y + 14).strokeColor('#fed7aa').lineWidth(1).stroke();
   return y + 22;
 }
-async function buildPdf(fn: (doc: any) => void): Promise<Buffer> {
+async function buildPdf(fn: (doc: any) => void, br?: PdfBranding): Promise<Buffer> {
   const doc = new PDFDoc({ margin: M, bufferPages: true, size: 'A4' });
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((res, rej) => {
@@ -68,8 +74,12 @@ async function buildPdf(fn: (doc: any) => void): Promise<Buffer> {
   const rng = doc.bufferedPageRange();
   for (let i = 0; i < rng.count; i++) {
     doc.switchToPage(rng.start + i);
+    if (br?.logo && (br.settings.logoPosition === 'watermark' || br.settings.logoPosition === 'both')) {
+      applyWatermark(doc, br.logo, br.settings.watermarkOpacity);
+    }
+    const footerLabel = br?.settings.footerText ?? 'TransPro CI';
     doc.fillColor(GR).font('Helvetica').fontSize(7.5).text(
-      `TransPro CI  ·  Page ${i + 1} / ${rng.count}`,
+      `${footerLabel}  ·  Page ${i + 1} / ${rng.count}`,
       M, doc.page.height - 26, { width: CW, align: 'center', lineBreak: false },
     );
   }
@@ -369,7 +379,7 @@ export class SettlementsService {
     const [tenant, settlements] = await Promise.all([
       this.prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { name: true, sigle: true, phone: true },
+        select: { name: true, sigle: true, phone: true, logo: true, settings: true },
       }),
       this.prisma.settlement.findMany({
         where: {
@@ -383,6 +393,8 @@ export class SettlementsService {
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'Compagnie';
     const period  = from === to ? from : `${from} → ${to}`;
+    const br: PdfBranding = { logo: parseLogo((tenant as any)?.logo), settings: extractBranding((tenant as any)?.settings) };
+    const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     const totalGross = settlements.reduce((s, r) => s + r.totalAmount, 0);
     const totalFees  = settlements.reduce((s, r) => s + r.geniusPayFees, 0);
@@ -457,7 +469,7 @@ export class SettlementsService {
     ];
 
     const buffer = await buildPdf((doc) => {
-      let y = pdfHdr(doc, 'RELEVÉ DE REVERSEMENTS', `Période : ${period}`, company);
+      let y = pdfHdr(doc, 'RELEVÉ DE REVERSEMENTS', `Période : ${period}`, company, hdrLogo);
 
       y = pdfKpiRow(doc, [
         { label: 'Total brut encaissé', value: fmtXOF(totalGross) },
@@ -491,7 +503,7 @@ export class SettlementsService {
         fmtXOF(totalNet),
         '',
       ], cols, y);
-    });
+    }, br);
 
     return {
       buffer,

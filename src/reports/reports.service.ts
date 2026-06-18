@@ -1,6 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import dayjs from 'dayjs';
+import {
+  DocumentBrandingSettings,
+  drawHeaderLogo,
+  applyWatermark,
+  extractBranding,
+  parseLogo,
+} from '../common/pdf-branding.helper';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDoc = require('pdfkit') as typeof import('pdfkit');
@@ -55,20 +62,28 @@ function buildCsv(headers: string[], rows: string[][]): string {
 }
 
 // ─── PDF drawing helpers ─────────────────────────────────────────────────────
-function pdfHeader(doc: any, company: string, title: string, period: string, brand: string): number {
+function pdfHeader(
+  doc: any, company: string, title: string, period: string, brand: string,
+  logoBuffer?: Buffer | null,
+): number {
   doc.fillColor(brand).rect(MARGIN, 30, CONTENT_W, 3).fill();
 
+  const xOff = logoBuffer ? drawHeaderLogo(doc, logoBuffer, 32) : 0;
+  const tw = 260 - xOff;
+  const nameY = logoBuffer ? 40 : 44;
+  const subY  = logoBuffer ? 57 : 67;
+
   doc.fillColor(DARK).font('Helvetica-Bold').fontSize(15)
-    .text(company, MARGIN, 44, { width: 260, lineBreak: false });
+    .text(company, MARGIN + xOff, nameY, { width: tw, lineBreak: false });
 
   doc.fillColor(brand).font('Helvetica-Bold').fontSize(12)
     .text(title, MARGIN + 255, 46, { width: 260, align: 'right', lineBreak: false });
 
   doc.fillColor(GRAY).font('Helvetica').fontSize(9)
-    .text(period, MARGIN, 67, { width: 300, lineBreak: false })
+    .text(period, MARGIN + xOff, subY, { width: 300 - xOff, lineBreak: false })
     .text(
       `Généré le ${fmtDate(new Date(), 'DD/MM/YYYY')} à ${fmtDate(new Date(), 'HH:mm')}`,
-      MARGIN + 255, 67, { width: 260, align: 'right', lineBreak: false },
+      MARGIN + 255, subY, { width: 260, align: 'right', lineBreak: false },
     );
 
   doc.moveTo(MARGIN, 83).lineTo(MARGIN + CONTENT_W, 83)
@@ -153,12 +168,18 @@ function pdfTotalRow(doc: any, cells: string[], cols: { text: string; width: num
   return y + rowH;
 }
 
-function pdfFooter(doc: any) {
+type PdfBranding = { logo: Buffer | null; settings: DocumentBrandingSettings };
+
+function pdfFooter(doc: any, br?: PdfBranding) {
   const range = doc.bufferedPageRange();
   for (let i = 0; i < range.count; i++) {
     doc.switchToPage(range.start + i);
+    if (br?.logo && (br.settings.logoPosition === 'watermark' || br.settings.logoPosition === 'both')) {
+      applyWatermark(doc, br.logo, br.settings.watermarkOpacity);
+    }
+    const footerLabel = br?.settings.footerText ?? 'TransPro CI';
     doc.fillColor(GRAY).font('Helvetica').fontSize(8).text(
-      `TransPro CI  ·  Page ${i + 1} / ${range.count}`,
+      `${footerLabel}  ·  Page ${i + 1} / ${range.count}`,
       MARGIN,
       doc.page.height - 28,
       { width: CONTENT_W, align: 'center', lineBreak: false },
@@ -166,7 +187,7 @@ function pdfFooter(doc: any) {
   }
 }
 
-async function buildPdf(buildFn: (doc: any) => void): Promise<Buffer> {
+async function buildPdf(buildFn: (doc: any) => void, br?: PdfBranding): Promise<Buffer> {
   const doc = new PDFDoc({ margin: MARGIN, bufferPages: true, size: 'A4' });
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((resolve, reject) => {
@@ -175,7 +196,7 @@ async function buildPdf(buildFn: (doc: any) => void): Promise<Buffer> {
     doc.on('error', reject);
   });
   buildFn(doc);
-  pdfFooter(doc);
+  pdfFooter(doc, br);
   doc.end();
   return done;
 }
@@ -208,7 +229,7 @@ export class ReportsService {
     const end = date.endOf('day').toDate();
 
     const [tenant, bookings, brand] = await Promise.all([
-      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true } }),
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true, logo: true, settings: true } }),
       this.prisma.booking.findMany({
         where: { tenantId, createdAt: { gte: start, lte: end } },
         include: {
@@ -222,6 +243,8 @@ export class ReportsService {
     ]);
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
+    const br: PdfBranding = { logo: parseLogo((tenant as any)?.logo), settings: extractBranding((tenant as any)?.settings) };
+    const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
     const confirmed = bookings.filter(b => b.status === 'CONFIRMED' || b.status === 'COMPLETED');
     const cancelled = bookings.filter(b => b.status === 'CANCELLED');
     const totalRevenue = confirmed.reduce((s, b) => s + b.totalAmount, 0);
@@ -268,7 +291,7 @@ export class ReportsService {
     }
 
     const buffer = await buildPdf((doc) => {
-      let y = pdfHeader(doc, company, 'Ventes journalières', frenchFull(date), brand);
+      let y = pdfHeader(doc, company, 'Ventes journalières', frenchFull(date), brand, hdrLogo);
 
       y = pdfKpis(doc, [
         { label: "Chiffre d'affaires", value: fmtAmt(totalRevenue) },
@@ -291,7 +314,7 @@ export class ReportsService {
         }
         y = pdfTableRow(doc, row, cols, y, i % 2 === 0);
       });
-    });
+    }, br);
 
     return { buffer, filename: `ventes-${date.format('YYYY-MM-DD')}.pdf`, mimetype: 'application/pdf' };
   }
@@ -302,7 +325,7 @@ export class ReportsService {
     const weekEnd = weekStart.add(6, 'day').endOf('day');
 
     const [tenant, payments, bookings, brand] = await Promise.all([
-      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true } }),
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true, logo: true, settings: true } }),
       this.prisma.payment.findMany({
         where: { tenantId, status: 'SUCCESS', paidAt: { gte: weekStart.toDate(), lte: weekEnd.toDate() } },
         select: { amount: true, paidAt: true },
@@ -315,6 +338,8 @@ export class ReportsService {
     ]);
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
+    const br: PdfBranding = { logo: parseLogo((tenant as any)?.logo), settings: extractBranding((tenant as any)?.settings) };
+    const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     const days = Array.from({ length: 7 }, (_, i) => {
       const d = weekStart.add(i, 'day');
@@ -358,7 +383,7 @@ export class ReportsService {
       let y = pdfHeader(
         doc, company, 'Bilan hebdomadaire',
         `${frenchShort(weekStart)} – ${frenchShort(weekEnd)}  ${weekEnd.year()}`,
-        brand,
+        brand, hdrLogo,
       );
 
       y = pdfKpis(doc, [
@@ -374,7 +399,7 @@ export class ReportsService {
       });
 
       y = pdfTotalRow(doc, ['TOTAL', bookings.length.toString(), totalConfirmed.toString(), totalCancelled.toString(), fmtAmt(totalRevenue)], cols, y + 4);
-    });
+    }, br);
 
     return { buffer, filename: `bilan-${weekStart.format('YYYY-MM-DD')}.pdf`, mimetype: 'application/pdf' };
   }
@@ -382,7 +407,7 @@ export class ReportsService {
   // ── Trip Report ────────────────────────────────────────────────────────────
   async tripReport(userId: string, tenantId: string, tripId: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
     const [tenant, trip, brand] = await Promise.all([
-      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true } }),
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, sigle: true, logo: true, settings: true } }),
       this.prisma.trip.findFirst({
         where: { id: tripId, tenantId },
         include: {
@@ -404,6 +429,8 @@ export class ReportsService {
     if (!trip) throw new NotFoundException('Voyage introuvable');
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
+    const br: PdfBranding = { logo: parseLogo((tenant as any)?.logo), settings: extractBranding((tenant as any)?.settings) };
+    const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     type SeatRow = { seat: string; name: string; phone: string; ref: string; amount: number; method: string };
     const seatRows: SeatRow[] = trip.bookings
@@ -448,7 +475,7 @@ export class ReportsService {
       let y = pdfHeader(
         doc, company, 'Rapport de voyage',
         `${(trip.route as any).originCity?.name ?? ''} → ${(trip.route as any).destinationCity?.name ?? ''}  ·  ${frenchFull(dep)} à ${dep.format('HH:mm')}`,
-        brand,
+        brand, hdrLogo,
       );
 
       // Trip info strip
@@ -485,7 +512,7 @@ export class ReportsService {
         }
         y = pdfTableRow(doc, [r.seat, r.name, r.phone, r.ref, fmtAmt(r.amount), r.method], cols, y, i % 2 === 0);
       });
-    });
+    }, br);
 
     return {
       buffer,
@@ -500,7 +527,7 @@ export class ReportsService {
     const start = date.startOf('day').toDate();
     const end = date.endOf('day').toDate();
 
-    const [station, bookings, brand] = await Promise.all([
+    const [station, bookings, brand, tenantForBr] = await Promise.all([
       this.prisma.station.findFirst({ where: { id: stationId, tenantId }, select: { name: true, city: { select: { name: true } }, code: true } }),
       this.prisma.booking.findMany({
         where: { tenantId, soldByStationId: stationId, createdAt: { gte: start, lte: end } },
@@ -512,6 +539,7 @@ export class ReportsService {
         orderBy: { createdAt: 'asc' },
       }),
       this.getThemeBrand(userId),
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { logo: true, settings: true } }),
     ]);
 
     if (!station) throw new NotFoundException('Gare introuvable');
@@ -519,6 +547,8 @@ export class ReportsService {
     const confirmed = bookings.filter(b => b.status === 'CONFIRMED' || b.status === 'COMPLETED');
     const cancelled = bookings.filter(b => b.status === 'CANCELLED');
     const totalRevenue = confirmed.reduce((s, b) => s + b.totalAmount, 0);
+    const br: PdfBranding = { logo: parseLogo(tenantForBr?.logo), settings: extractBranding(tenantForBr?.settings) };
+    const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     const cols = [
       { text: 'Référence',  width: 82 },
@@ -562,7 +592,7 @@ export class ReportsService {
     }
 
     const buffer = await buildPdf((doc) => {
-      let y = pdfHeader(doc, stationLabel, 'Ventes journalières', frenchFull(date), brand);
+      let y = pdfHeader(doc, stationLabel, 'Ventes journalières', frenchFull(date), brand, hdrLogo);
       y = pdfKpis(doc, [
         { label: "Chiffre d'affaires", value: fmtAmt(totalRevenue) },
         { label: 'Billets vendus', value: bookings.length.toString(), sub: `${confirmed.length} confirmés · ${cancelled.length} annulés` },
@@ -573,7 +603,7 @@ export class ReportsService {
         if (y > doc.page.height - 70) { doc.addPage(); y = pdfTableHead(doc, cols, 40); }
         y = pdfTableRow(doc, row, cols, y, i % 2 === 0);
       });
-    });
+    }, br);
 
     return { buffer, filename: `gare-ventes-${date.format('YYYY-MM-DD')}.pdf`, mimetype: 'application/pdf' };
   }
@@ -583,7 +613,7 @@ export class ReportsService {
     const weekStart = (dayjs(weekStartStr).isValid() ? dayjs(weekStartStr) : dayjs()).startOf('day');
     const weekEnd = weekStart.add(6, 'day').endOf('day');
 
-    const [station, payments, bookings, brand] = await Promise.all([
+    const [station, payments, bookings, brand, tenantForBr] = await Promise.all([
       this.prisma.station.findFirst({ where: { id: stationId, tenantId }, select: { name: true, city: { select: { name: true } }, code: true } }),
       this.prisma.payment.findMany({
         where: {
@@ -598,10 +628,13 @@ export class ReportsService {
         select: { createdAt: true, status: true, totalAmount: true },
       }),
       this.getThemeBrand(userId),
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { logo: true, settings: true } }),
     ]);
 
     if (!station) throw new NotFoundException('Gare introuvable');
     const stationLabel = station.code ? `${station.name} (${station.code})` : station.name;
+    const br: PdfBranding = { logo: parseLogo(tenantForBr?.logo), settings: extractBranding(tenantForBr?.settings) };
+    const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     const days = Array.from({ length: 7 }, (_, i) => {
       const d = weekStart.add(i, 'day');
@@ -647,7 +680,7 @@ export class ReportsService {
     }
 
     const buffer = await buildPdf((doc) => {
-      let y = pdfHeader(doc, stationLabel, 'Bilan hebdomadaire', `${frenchShort(weekStart)} – ${frenchShort(weekEnd)}  ${weekEnd.year()}`, brand);
+      let y = pdfHeader(doc, stationLabel, 'Bilan hebdomadaire', `${frenchShort(weekStart)} – ${frenchShort(weekEnd)}  ${weekEnd.year()}`, brand, hdrLogo);
       y = pdfKpis(doc, [
         { label: "Chiffre d'affaires", value: fmtAmt(totalRevenue) },
         { label: 'Billets vendus', value: bookings.length.toString() },
@@ -673,14 +706,14 @@ export class ReportsService {
           by = pdfTableRow(doc, [METHOD_LABELS[method] ?? method, fmtAmt(amount), `${pct} %`], mCols, by, i % 2 === 0);
         });
       }
-    });
+    }, br);
 
     return { buffer, filename: `gare-bilan-${weekStart.format('YYYY-MM-DD')}.pdf`, mimetype: 'application/pdf' };
   }
 
   // ── Station Trip Report ────────────────────────────────────────────────────
   async stationTripReport(userId: string, stationId: string, tenantId: string, tripId: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
-    const [station, trip, brand] = await Promise.all([
+    const [station, trip, brand, tenantForBr] = await Promise.all([
       this.prisma.station.findFirst({ where: { id: stationId, tenantId }, select: { name: true, code: true } }),
       this.prisma.trip.findFirst({
         where: { id: tripId, tenantId },
@@ -698,12 +731,15 @@ export class ReportsService {
         },
       }),
       this.getThemeBrand(userId),
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { logo: true, settings: true } }),
     ]);
 
     if (!station) throw new NotFoundException('Gare introuvable');
     if (!trip) throw new NotFoundException('Voyage introuvable');
 
     const stationLabel = station.code ? `${station.name} (${station.code})` : station.name;
+    const br: PdfBranding = { logo: parseLogo(tenantForBr?.logo), settings: extractBranding(tenantForBr?.settings) };
+    const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     type SeatRow = { seat: string; name: string; phone: string; ref: string; amount: number; method: string };
     const seatRows: SeatRow[] = trip.bookings
@@ -748,7 +784,7 @@ export class ReportsService {
       let y = pdfHeader(
         doc, stationLabel, 'Manifeste de voyage',
         `${(trip.route as any).originCity?.name ?? ''} → ${(trip.route as any).destinationCity?.name ?? ''}  ·  ${frenchFull(dep)} à ${dep.format('HH:mm')}`,
-        brand,
+        brand, hdrLogo,
       );
 
       doc.fillColor('#f1f5f9').rect(MARGIN, y, CONTENT_W, 46).fill();
@@ -779,7 +815,7 @@ export class ReportsService {
         if (y > doc.page.height - 70) { doc.addPage(); y = pdfTableHead(doc, cols, 40); }
         y = pdfTableRow(doc, [r.seat, r.name, r.phone, r.ref, fmtAmt(r.amount), r.method], cols, y, i % 2 === 0);
       });
-    });
+    }, br);
 
     return {
       buffer,

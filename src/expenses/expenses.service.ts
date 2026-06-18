@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '@transpro/shared';
 import * as XLSX from 'xlsx';
 import { StatementOutput, buildPdfFromExpenses, CAT_LBL } from './expenses.pdf';
+import { extractBranding, parseLogo } from '../common/pdf-branding.helper';
 import { StationCashPeriodsService } from '../station-cash-periods/station-cash-periods.service';
 
 @Injectable()
@@ -222,10 +223,10 @@ export class ExpensesService {
     endD.setDate(0);
     endD.setUTCHours(23, 59, 59, 999);
 
-    const station = await this.prisma.station.findFirst({
-      where: { id: stationId, tenantId },
-      select: { name: true },
-    });
+    const [station, tenantForBranding] = await Promise.all([
+      this.prisma.station.findFirst({ where: { id: stationId, tenantId }, select: { name: true } }),
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { logo: true, settings: true } }),
+    ]);
     if (!station) throw new NotFoundException('Gare introuvable');
 
     const [expensesRaw, provisionsRaw, bookings] = await Promise.all([
@@ -322,6 +323,7 @@ export class ExpensesService {
       };
     }
 
+    const brandingSettings = extractBranding(tenantForBranding?.settings);
     const buffer = await buildPdfFromExpenses({
       stationName,
       period,
@@ -334,6 +336,7 @@ export class ExpensesService {
       byCategory,
       expenses: expensesRaw,
       provisions: provisionsRaw,
+      branding: { logo: parseLogo(tenantForBranding?.logo), settings: brandingSettings },
     });
 
     return {

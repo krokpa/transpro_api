@@ -14,6 +14,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TenantsService } from './tenants.service';
 import { PlanLimitsService } from '../common/plan-limits.service';
 import { CreateTenantDto, UpdateTenantDto } from './dto/tenant.dto';
+import { UpdateDocumentBrandingDto } from './dto/document-branding.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -75,6 +76,17 @@ export class TenantsController {
   @ApiOperation({ summary: 'Mettre à jour la compagnie courante' })
   updateMe(@CurrentUser('tenantId') tenantId: string, @Body() dto: UpdateTenantDto) {
     return this.tenantsService.update(tenantId, dto);
+  }
+
+  @Patch('me/document-branding')
+  @ApiBearerAuth()
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
+  @ApiOperation({ summary: 'Configurer le branding logo sur les documents PDF/tickets' })
+  updateDocumentBranding(
+    @CurrentUser('tenantId') tenantId: string,
+    @Body() dto: UpdateDocumentBrandingDto,
+  ) {
+    return this.tenantsService.updateDocumentBranding(tenantId, dto);
   }
 
   @Get('me/stats')
