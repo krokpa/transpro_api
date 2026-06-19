@@ -37,6 +37,11 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   themeSidebar?: string;
+
+  @ApiPropertyOptional({ example: 'system', enum: ['light', 'dark', 'system'] })
+  @IsOptional()
+  @IsString()
+  themeColorMode?: string;
 }
 
 export class ChangePasswordDto {

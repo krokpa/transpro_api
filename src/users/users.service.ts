@@ -80,7 +80,7 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id },
       data: dto,
-      select: { id: true, email: true, phone: true, firstName: true, lastName: true, role: true, preferredLang: true, avatar: true, themeAccent: true, themeSidebar: true, updatedAt: true },
+      select: { id: true, email: true, phone: true, firstName: true, lastName: true, role: true, preferredLang: true, avatar: true, themeAccent: true, themeSidebar: true, themeColorMode: true, updatedAt: true },
     });
   }
 

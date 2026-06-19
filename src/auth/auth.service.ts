@@ -395,6 +395,7 @@ export class AuthService {
         avatar: true,
         themeAccent: true,
         themeSidebar: true,
+        themeColorMode: true,
         createdAt: true,
         tenant: {
           select: {
