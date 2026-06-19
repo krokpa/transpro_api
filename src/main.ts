@@ -19,18 +19,28 @@ async function bootstrap() {
 
   const config = app.get(ConfigService);
 
+  // CORS — must be registered before helmet
+  const allowedOrigins = [
+    config.get('FRONTEND_URL', 'http://localhost:3000'),
+    config.get('PASSENGER_URL', 'http://localhost:3002'),
+  ].filter(Boolean);
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS blocked: ${origin}`), false);
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
+
   // Security
   await app.register(helmet as any, { contentSecurityPolicy: false });
   await app.register(compression as any);
-
-  // CORS
-  app.enableCors({
-    origin: [
-      config.get('FRONTEND_URL', 'http://localhost:3000'),
-      config.get('PASSENGER_URL', 'http://localhost:3002'),
-    ],
-    credentials: true,
-  });
 
   // Global pipes, filters, interceptors
   app.useGlobalPipes(
