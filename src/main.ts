@@ -15,28 +15,30 @@ async function bootstrap() {
     logger: process.env.NODE_ENV !== 'production',
     bodyLimit: 5 * 1024 * 1024, // 5 MB — accommodate base64-encoded logos
   });
+
+  // CORS via raw Fastify hook — runs before every plugin including helmet
+  const allowedOrigins = [
+    process.env.FRONTEND_URL  || 'http://localhost:3000',
+    process.env.PASSENGER_URL || 'http://localhost:3002',
+  ];
+  adapter.getInstance().addHook('onRequest', (request, reply, done) => {
+    const origin = request.headers.origin as string | undefined;
+    if (origin && allowedOrigins.includes(origin)) {
+      reply.header('Access-Control-Allow-Origin', origin);
+      reply.header('Access-Control-Allow-Credentials', 'true');
+      reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    }
+    if (request.method === 'OPTIONS') {
+      reply.status(204).send();
+      return;
+    }
+    done();
+  });
+
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter);
 
   const config = app.get(ConfigService);
-
-  // CORS — must be registered before helmet
-  const allowedOrigins = [
-    config.get('FRONTEND_URL', 'http://localhost:3000'),
-    config.get('PASSENGER_URL', 'http://localhost:3002'),
-  ].filter(Boolean);
-
-  app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS blocked: ${origin}`), false);
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  });
 
   // Security
   await app.register(helmet as any, { contentSecurityPolicy: false });
