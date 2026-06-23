@@ -21,8 +21,9 @@ import {
 
 const KEY_PREFIX_LENGTH = 16; // chars utilisés pour le lookup DB
 
-function generateRawKey(): string {
-  return `tpk_live_${randomBytes(24).toString('base64url')}`;
+function generateRawKey(environment: 'LIVE' | 'TEST' = 'LIVE'): string {
+  const prefix = environment === 'TEST' ? 'tpk_test_' : 'tpk_live_';
+  return `${prefix}${randomBytes(24).toString('base64url')}`;
 }
 
 function generateWebhookSecret(): string {
@@ -82,7 +83,7 @@ export class ApiConsumersService {
       include: {
         keys: {
           select: {
-            id: true, name: true, keyPrefix: true, scopes: true,
+            id: true, name: true, keyPrefix: true, environment: true, scopes: true,
             isActive: true, expiresAt: true, lastUsedAt: true, revokedAt: true, createdAt: true,
           },
           orderBy: { createdAt: 'desc' },
@@ -138,7 +139,8 @@ export class ApiConsumersService {
       );
     }
 
-    const rawKey   = generateRawKey();
+    const environment = dto.environment === 'TEST' ? 'TEST' : 'LIVE';
+    const rawKey   = generateRawKey(environment);
     const keyPrefix = rawKey.substring(0, KEY_PREFIX_LENGTH);
     const keyHash   = createHash('sha256').update(rawKey).digest('hex');
 
@@ -148,6 +150,7 @@ export class ApiConsumersService {
         name:      dto.name,
         keyPrefix,
         keyHash,
+        environment,
         scopes:    requestedScopes,
         expiresAt: dto.expiresAt,
       },
@@ -156,6 +159,7 @@ export class ApiConsumersService {
     // La clé brute n'est retournée QU'UNE SEULE FOIS
     return {
       key: rawKey,
+      environment,
       message: 'Copiez cette clé maintenant, elle ne sera plus affichée.',
     };
   }

@@ -152,7 +152,27 @@ avec backoff (1 min → 24 h). Soyez **idempotent** (utilisez `X-TransPro-Delive
 
 ---
 
-## 7. Bonnes pratiques
+## 7. Sandbox (mode test)
+
+Générez une **clé de test** (`tpk_test_…`) depuis le portail développeur pour
+intégrer sans risque :
+- Les endpoints de **lecture** fonctionnent sur les données réelles.
+- Les clés de test **ne décomptent pas** votre quota (header `X-RateLimit-Limit: unlimited`).
+- Chaque réponse porte le header `X-TransPro-Environment: test`.
+- `POST /ext/bookings` renvoie une **réservation simulée** (`"test": true`) :
+  les entrées sont validées mais **aucune réservation réelle** n'est créée et
+  les places ne sont pas impactées.
+
+### Tester vos webhooks
+```
+POST /ext/test/trigger-webhook
+Body (optionnel): { "event": "BOOKING_CONFIRMED" }
+```
+Envoie un événement d'exemple signé vers votre `webhookUrl`. Réservé aux clés de test.
+
+---
+
+## 8. Bonnes pratiques
 
 - **Mettez en cache** les listes peu changeantes (`/stations`, `/routes`).
 - **Paginez** avec `limit`/`offset` plutôt que de tout charger.
@@ -162,7 +182,7 @@ avec backoff (1 min → 24 h). Soyez **idempotent** (utilisez `X-TransPro-Delive
 
 ---
 
-## 8. Versioning
+## 9. Versioning
 
 L'API est versionnée par URL (`/api/v1`). Les changements incompatibles
 introduiront `/api/v2` avec une période de dépréciation annoncée.

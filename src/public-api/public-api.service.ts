@@ -1,6 +1,8 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentsService } from '../payments/payments.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookEvent } from '@prisma/client';
 
 @Injectable()
 export class PublicApiService {
@@ -9,6 +11,7 @@ export class PublicApiService {
   constructor(
     private prisma: PrismaService,
     private payments: PaymentsService,
+    private webhooks: WebhooksService,
   ) {}
 
   /**
@@ -152,6 +155,7 @@ export class PublicApiService {
     seatNumbers:     string[];
     tenantId?:       string;
     apiConsumerId?:  string;
+    isTest?:         boolean;
   }) {
     // Charger le voyage
     const trip = await this.prisma.trip.findFirst({
@@ -165,6 +169,31 @@ export class PublicApiService {
 
     if (trip.availableSeats < dto.seatNumbers.length) {
       throw new BadRequestException('Places insuffisantes sur ce voyage');
+    }
+
+    // ── Mode sandbox (clé TEST) : réponse simulée, aucune persistance ──
+    // Valide les entrées mais ne crée pas de réservation et ne touche pas
+    // aux places ; renvoie une réservation fictive + un lien de paiement factice.
+    if (dto.isTest) {
+      const ref = `TPX_TEST_${Date.now().toString(36).toUpperCase()}`;
+      return {
+        test: true,
+        id: `test_${ref}`,
+        reference: ref,
+        status: 'PENDING',
+        totalAmount: trip.price * dto.seatNumbers.length,
+        currency: 'XOF',
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        createdAt: new Date(),
+        seatNumbers: dto.seatNumbers,
+        payment: {
+          url: `https://sandbox.transpro.ci/pay/${ref}`,
+          reference: ref,
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        },
+        message:
+          'Réponse sandbox — aucune réservation réelle créée. Utilisez POST /ext/test/trigger-webhook pour tester vos webhooks.',
+      };
     }
 
     // Trouver ou créer le passager
@@ -281,5 +310,39 @@ export class PublicApiService {
 
     if (!parcel) throw new NotFoundException('Colis introuvable');
     return parcel;
+  }
+
+  // ── Sandbox ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Émet un événement webhook d'exemple vers le consumer, pour qu'un développeur
+   * teste son endpoint de réception. Réservé aux clés TEST.
+   */
+  async triggerTestWebhook(consumerId?: string, environment?: string, event?: string) {
+    if (environment !== 'TEST') {
+      throw new ForbiddenException('Réservé aux clés de test (tpk_test_).');
+    }
+    const consumer = await this.prisma.apiConsumer.findUnique({
+      where: { id: consumerId ?? '' },
+    });
+    if (!consumer?.webhookUrl) {
+      throw new BadRequestException(
+        'Configurez d’abord une URL webhook sur votre intégration.',
+      );
+    }
+
+    const allowed = Object.values(WebhookEvent) as string[];
+    const evt = (event && allowed.includes(event) ? event : 'BOOKING_CONFIRMED') as WebhookEvent;
+
+    await this.webhooks.emitToConsumer(consumer.id, evt, {
+      test: true,
+      bookingId: 'test_booking',
+      reference: 'TPX_TEST_SAMPLE',
+      status: 'CONFIRMED',
+      tripId: 'test_trip',
+      note: 'Événement de test généré depuis le sandbox TransPro.',
+    });
+
+    return { queued: true, event: evt, url: consumer.webhookUrl };
   }
 }

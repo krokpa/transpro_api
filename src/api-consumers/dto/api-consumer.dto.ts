@@ -75,6 +75,10 @@ export class CreateApiKeyDto {
   name: string;
 
   @IsOptional()
+  @IsIn(['LIVE', 'TEST'])
+  environment?: 'LIVE' | 'TEST';
+
+  @IsOptional()
   @IsArray()
   @IsIn(Object.values(SCOPE), { each: true })
   scopes?: ApiScope[];

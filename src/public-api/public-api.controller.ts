@@ -109,6 +109,7 @@ export class PublicApiController {
       ...body,
       tenantId: req.apiConsumer?.tenantId ?? undefined,
       apiConsumerId: req.apiConsumer?.id,
+      isTest: req.apiEnvironment === 'TEST',
     });
   }
 
@@ -128,6 +129,22 @@ export class PublicApiController {
     return this.service.trackParcel(code, req.apiConsumer?.tenantId ?? undefined);
   }
 
+  // ── Sandbox ─────────────────────────────────────────────────────────────────
+
+  @Post('test/trigger-webhook')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Sandbox : déclencher un webhook de test (clé TEST requise)' })
+  triggerTestWebhook(
+    @Body() body: { event?: string },
+    @Req() req: any,
+  ) {
+    return this.service.triggerTestWebhook(
+      req.apiConsumer?.id,
+      req.apiEnvironment,
+      body?.event,
+    );
+  }
+
   // ── Meta ───────────────────────────────────────────────────────────────────
 
   @Get('me')
@@ -137,10 +154,11 @@ export class PublicApiController {
     return {
       consumer: safe,
       key: {
-        id:        req.apiKey.id,
-        name:      req.apiKey.name,
-        scopes:    req.apiKey.scopes,
-        expiresAt: req.apiKey.expiresAt,
+        id:          req.apiKey.id,
+        name:        req.apiKey.name,
+        environment: req.apiKey.environment,
+        scopes:      req.apiKey.scopes,
+        expiresAt:   req.apiKey.expiresAt,
       },
     };
   }

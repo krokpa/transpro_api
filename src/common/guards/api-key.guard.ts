@@ -70,14 +70,21 @@ export class ApiKeyGuard implements CanActivate {
       }
     }
 
+    const isTest = apiKey.environment === 'TEST';
+
     // Vérification quota mensuel + headers X-RateLimit-*
+    // Les clés sandbox (TEST) ne sont pas décomptées du quota.
     const limit = API_PLAN_LIMITS[consumer.plan];
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
     const resetEpoch = Math.floor(monthEnd.getTime() / 1000);
 
-    if (limit === Infinity) {
+    if (isTest) {
+      this.setHeader(response, 'X-RateLimit-Limit', 'unlimited');
+      this.setHeader(response, 'X-RateLimit-Remaining', 'unlimited');
+      this.setHeader(response, 'X-RateLimit-Reset', resetEpoch);
+    } else if (limit === Infinity) {
       this.setHeader(response, 'X-RateLimit-Limit', 'unlimited');
       this.setHeader(response, 'X-RateLimit-Remaining', 'unlimited');
       this.setHeader(response, 'X-RateLimit-Reset', resetEpoch);
@@ -125,8 +132,10 @@ export class ApiKeyGuard implements CanActivate {
     }).catch(() => {});
 
     // Injecter le consommateur dans la requête
-    request.apiConsumer = consumer;
-    request.apiKey      = apiKey;
+    request.apiConsumer   = consumer;
+    request.apiKey        = apiKey;
+    request.apiEnvironment = apiKey.environment;
+    this.setHeader(response, 'X-TransPro-Environment', isTest ? 'test' : 'live');
 
     return true;
   }
