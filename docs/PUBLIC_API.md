@@ -113,7 +113,46 @@ données.
 
 ---
 
-## 6. Bonnes pratiques
+## 6. Webhooks
+
+Configurez une `webhookUrl` sur votre compte (via l'équipe TransPro). Un secret
+de signature `whsec_…` est généré ; il sert à vérifier l'authenticité des appels.
+
+### Événements
+| Événement | Déclencheur |
+|-----------|-------------|
+| `BOOKING_CONFIRMED` | Paiement d'une réservation confirmé |
+| `BOOKING_CANCELLED` | Réservation annulée (expiration de paiement ou voyage annulé) |
+| `TRIP_DELAYED` | Voyage retardé |
+| `TRIP_CANCELLED` | Voyage annulé par la compagnie |
+
+### Format de l'appel (POST vers votre URL)
+Headers :
+- `X-TransPro-Event` — type d'événement
+- `X-TransPro-Delivery` — id unique de livraison
+- `X-TransPro-Timestamp` — horodatage (ms)
+- `X-TransPro-Signature` — `sha256=<hmac>`
+
+Corps :
+```json
+{ "id": "<delivery>", "event": "BOOKING_CONFIRMED", "createdAt": "…", "data": { … } }
+```
+
+### Vérifier la signature
+HMAC-SHA256 de `"{timestamp}.{corps brut}"` avec votre `webhookSecret` :
+```js
+const expected = crypto.createHmac('sha256', secret)
+  .update(`${timestamp}.${rawBody}`).digest('hex');
+// comparer `sha256=${expected}` au header X-TransPro-Signature
+```
+
+### Fiabilité
+Répondez `2xx` rapidement. En cas d'échec, TransPro réessaie jusqu'à **6 fois**
+avec backoff (1 min → 24 h). Soyez **idempotent** (utilisez `X-TransPro-Delivery`).
+
+---
+
+## 7. Bonnes pratiques
 
 - **Mettez en cache** les listes peu changeantes (`/stations`, `/routes`).
 - **Paginez** avec `limit`/`offset` plutôt que de tout charger.
@@ -123,7 +162,7 @@ données.
 
 ---
 
-## 7. Versioning
+## 8. Versioning
 
 L'API est versionnée par URL (`/api/v1`). Les changements incompatibles
 introduiront `/api/v2` avec une période de dépréciation annoncée.

@@ -8,6 +8,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PushService } from '../push/push.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookEvent } from '@prisma/client';
 import { CreateTripDto, UpdateTripStatusDto, SearchTripsDto } from './dto/trip.dto';
 import { SocketEvent, TripStatus, NotificationType } from '@transpro/shared';
 import dayjs from 'dayjs';
@@ -19,6 +21,7 @@ export class TripsService {
     private realtime: RealtimeService,
     private notifications: NotificationsService,
     private push: PushService,
+    private webhooks: WebhooksService,
   ) {}
 
   async create(tenantId: string, dto: CreateTripDto) {
@@ -213,7 +216,8 @@ export class TripsService {
       const activeBookings = await this.prisma.booking.findMany({
         where: { tripId: id, status: { in: ['PENDING', 'CONFIRMED'] } },
         select: {
-          passengerId: true, id: true, seatNumbers: true, tripId: true, totalAmount: true,
+          passengerId: true, id: true, reference: true, seatNumbers: true, tripId: true,
+          totalAmount: true, apiConsumerId: true,
           payment: { select: { id: true, status: true } },
         },
       });
@@ -294,6 +298,32 @@ export class TripsService {
           }).catch(() => {}),
         ),
       );
+
+      // ── Webhooks API tierce ──
+      const origin = (fullTrip as any)?.route?.originCity?.name ?? '';
+      const dest   = (fullTrip as any)?.route?.destinationCity?.name ?? '';
+      // TRIP_* vers chaque consumer ayant une réservation API sur ce voyage.
+      const consumerIds = [
+        ...new Set(activeBookings.map((b) => b.apiConsumerId).filter(Boolean)),
+      ] as string[];
+      for (const consumerId of consumerIds) {
+        this.webhooks.emitToConsumer(
+          consumerId,
+          isCancelled ? WebhookEvent.TRIP_CANCELLED : WebhookEvent.TRIP_DELAYED,
+          { tripId: id, status: dto.status, origin, destination: dest,
+            delayMinutes: isCancelled ? undefined : dto.delayMinutes },
+        ).catch(() => {});
+      }
+      // BOOKING_CANCELLED pour chaque réservation API annulée par la cascade.
+      if (isCancelled) {
+        for (const b of activeBookings) {
+          if (!b.apiConsumerId) continue;
+          this.webhooks.emitToConsumer(b.apiConsumerId, WebhookEvent.BOOKING_CANCELLED, {
+            bookingId: b.id, reference: b.reference, status: 'CANCELLED',
+            tripId: id, reason: 'Voyage annulé par la compagnie',
+          }).catch(() => {});
+        }
+      }
     }
 
     if (dto.status === 'DEPARTED' || dto.status === 'ARRIVED') {

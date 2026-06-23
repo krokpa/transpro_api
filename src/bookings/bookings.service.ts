@@ -9,6 +9,8 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookEvent } from '@prisma/client';
 import { CreateBookingDto, CreateGuichetBookingDto } from './dto/booking.dto';
 import { SocketEvent, BOOKING_EXPIRY_MINUTES, COMMISSION_RATE, NotificationType, PaymentMethod } from '@transpro/shared';
 import { generateReference } from '@transpro/shared';
@@ -26,6 +28,7 @@ export class BookingsService {
     private realtime: RealtimeService,
     private notifications: NotificationsService,
     private config: ConfigService,
+    private webhooks: WebhooksService,
   ) {
     const key = this.config.get<string>('ENCRYPTION_KEY');
     if (!key) throw new Error('[BookingsService] ENCRYPTION_KEY manquante — démarrage refusé');
@@ -744,7 +747,8 @@ export class BookingsService {
       const expired = await this.prisma.booking.findMany({
         where: { status: 'PENDING', expiresAt: { lt: now } },
         select: {
-          id: true, tripId: true, passengerId: true, seatNumbers: true, tenantId: true,
+          id: true, reference: true, tripId: true, passengerId: true, seatNumbers: true,
+          tenantId: true, apiConsumerId: true,
           trip: { select: { tenant: { select: { logo: true } } } },
         },
         take: BATCH,
@@ -779,6 +783,14 @@ export class BookingsService {
           data: { bookingId: booking.id },
           companyLogo: (booking as any).trip?.tenant?.logo ?? undefined,
         }).catch(() => {});
+
+        // Webhook API tierce : la réservation créée via /ext a expiré.
+        if (booking.apiConsumerId) {
+          this.webhooks.emitToConsumer(booking.apiConsumerId, WebhookEvent.BOOKING_CANCELLED, {
+            bookingId: booking.id, reference: booking.reference, status: 'CANCELLED',
+            tripId: booking.tripId, reason: 'Expiration du délai de paiement',
+          }).catch(() => {});
+        }
       }
 
       processed += expired.length;
