@@ -401,6 +401,82 @@ export class TripsService {
     });
   }
 
+  /**
+   * Destinations populaires (page d'accueil passager).
+   * Agrège les voyages à venir par ville de destination : tarif le plus bas
+   * ("dès X F"), nombre de voyages disponibles et prochain départ.
+   */
+  async popular(limit = 8) {
+    const now = new Date();
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        status: { in: ['SCHEDULED', 'BOARDING'] },
+        departureAt: { gte: now },
+        availableSeats: { gt: 0 },
+      },
+      select: {
+        price: true,
+        departureAt: true,
+        route: {
+          select: {
+            originCity: { select: { name: true } },
+            destinationCity: { select: { id: true, name: true, region: true } },
+          },
+        },
+      },
+      orderBy: { departureAt: 'asc' },
+    });
+
+    const byDest = new Map<
+      string,
+      {
+        destinationId: string;
+        destination: string;
+        region: string | null;
+        fromPrice: number;
+        tripCount: number;
+        nextDepartureAt: Date;
+        origins: Set<string>;
+      }
+    >();
+
+    for (const t of trips) {
+      const dest = t.route?.destinationCity;
+      const origin = t.route?.originCity?.name;
+      if (!dest) continue;
+      const price = Number(t.price);
+      const existing = byDest.get(dest.id);
+      if (existing) {
+        existing.tripCount += 1;
+        if (price < existing.fromPrice) existing.fromPrice = price;
+        if (origin) existing.origins.add(origin);
+      } else {
+        byDest.set(dest.id, {
+          destinationId: dest.id,
+          destination: dest.name,
+          region: dest.region ?? null,
+          fromPrice: price,
+          tripCount: 1,
+          nextDepartureAt: t.departureAt,
+          origins: origin ? new Set([origin]) : new Set(),
+        });
+      }
+    }
+
+    return Array.from(byDest.values())
+      .sort((a, b) => b.tripCount - a.tripCount)
+      .slice(0, limit)
+      .map((d) => ({
+        destinationId: d.destinationId,
+        destination: d.destination,
+        region: d.region,
+        fromPrice: d.fromPrice,
+        tripCount: d.tripCount,
+        nextDepartureAt: d.nextDepartureAt.toISOString(),
+        origins: Array.from(d.origins),
+      }));
+  }
+
   async manifest(tripId: string, tenantId: string) {
     const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId } });
     if (!trip) throw new NotFoundException('Voyage introuvable');

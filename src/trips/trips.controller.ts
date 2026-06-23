@@ -31,6 +31,13 @@ export class TripsController {
     return this.trips.upcoming(limit ? parseInt(limit, 10) : 10);
   }
 
+  @Public()
+  @Get('popular')
+  @ApiOperation({ summary: 'Destinations populaires (page d’accueil passager)' })
+  popular(@Query('limit') limit?: string) {
+    return this.trips.popular(limit ? parseInt(limit, 10) : 8);
+  }
+
   @Post()
   @ApiBearerAuth()
   @RequirePermission(PERM.TRIPS_CREATE)
