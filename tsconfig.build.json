@@ -2,6 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
+    "incremental": false,
     "paths": {
       "@transpro/shared": ["../../packages/shared/dist"],
       "@transpro/database": ["../../packages/database/dist"]
