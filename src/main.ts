@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import compression from '@fastify/compress';
 import helmet from '@fastify/helmet';
 import { AppModule } from './app.module';
+import { PublicApiModule } from './public-api/public-api.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
@@ -56,7 +57,7 @@ async function bootstrap() {
     ],
   });
 
-  // Swagger docs
+  // Swagger interne (toute l'API) — désactivé en production
   if (process.env.NODE_ENV !== 'production') {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('TransPro API')
@@ -67,6 +68,33 @@ async function bootstrap() {
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('docs', app, document);
   }
+
+  // ── Doc développeur publique (API tierce /ext uniquement) ───────────────────
+  // Exposée dans tous les environnements : c'est la doc destinée aux partenaires.
+  const devDocConfig = new DocumentBuilder()
+    .setTitle('TransPro — API Partenaires')
+    .setDescription(
+      [
+        'API publique TransPro pour les applications tierces.',
+        '',
+        '**Authentification** : envoyez votre clé dans le header `X-API-Key`.',
+        '**Quotas** : voir les headers `X-RateLimit-*` de chaque réponse.',
+        '**Scopes** : chaque endpoint requiert un scope (ex. `trips:read`) couvert par votre plan.',
+        '',
+        'Les données cross-compagnie ne couvrent que les compagnies ayant activé l’API publique.',
+      ].join('\n'),
+    )
+    .setVersion('1.0')
+    .addApiKey(
+      { type: 'apiKey', name: 'X-API-Key', in: 'header' },
+      'X-API-Key',
+    )
+    .addServer('/api/v1', 'Base TransPro API v1')
+    .build();
+  const devDocument = SwaggerModule.createDocument(app, devDocConfig, {
+    include: [PublicApiModule],
+  });
+  SwaggerModule.setup('developers', app, devDocument);
 
   // Remplace le parser JSON de NestJS/Fastify pour accepter les bodies vides
   // (ex: POST sans payload — Dio envoie Content-Type: application/json sans body).

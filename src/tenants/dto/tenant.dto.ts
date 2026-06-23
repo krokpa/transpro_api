@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TenantPlan, TenantStatus } from '@transpro/shared';
@@ -115,4 +115,9 @@ export class UpdateTenantDto {
   @IsNumber()
   @Transform(({ value }) => (value === null || value === undefined ? undefined : Number(value)))
   longitude?: number;
+
+  @ApiPropertyOptional({ description: 'Exposer cette compagnie à l’API publique tierce (opt-in)' })
+  @IsOptional()
+  @IsBoolean()
+  publicApiEnabled?: boolean;
 }

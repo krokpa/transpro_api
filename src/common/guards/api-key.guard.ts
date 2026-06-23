@@ -2,6 +2,8 @@ import {
   Injectable,
   CanActivate,
   ExecutionContext,
+  HttpException,
+  HttpStatus,
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -18,8 +20,15 @@ export class ApiKeyGuard implements CanActivate {
     private reflector: Reflector,
   ) {}
 
+  /** Définit un header de réponse (compatible adaptateur Fastify ou Express). */
+  private setHeader(res: any, name: string, value: string | number) {
+    if (typeof res?.header === 'function') res.header(name, value);
+    else if (typeof res?.setHeader === 'function') res.setHeader(name, value);
+  }
+
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
+    const response = context.switchToHttp().getResponse();
     const rawKey: string | undefined = request.headers['x-api-key'];
 
     if (!rawKey) {
@@ -61,20 +70,33 @@ export class ApiKeyGuard implements CanActivate {
       }
     }
 
-    // Vérification quota mensuel
+    // Vérification quota mensuel + headers X-RateLimit-*
     const limit = API_PLAN_LIMITS[consumer.plan];
-    if (limit !== Infinity) {
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+    const resetEpoch = Math.floor(monthEnd.getTime() / 1000);
 
+    if (limit === Infinity) {
+      this.setHeader(response, 'X-RateLimit-Limit', 'unlimited');
+      this.setHeader(response, 'X-RateLimit-Remaining', 'unlimited');
+      this.setHeader(response, 'X-RateLimit-Reset', resetEpoch);
+    } else {
       const usageThisMonth = await this.prisma.apiUsageLog.count({
         where: { consumerId: consumer.id, createdAt: { gte: monthStart } },
       });
+      const remaining = Math.max(0, limit - usageThisMonth);
+
+      this.setHeader(response, 'X-RateLimit-Limit', limit);
+      this.setHeader(response, 'X-RateLimit-Remaining', remaining);
+      this.setHeader(response, 'X-RateLimit-Reset', resetEpoch);
 
       if (usageThisMonth >= limit) {
-        throw new ForbiddenException(
+        const retryAfter = Math.max(1, resetEpoch - Math.floor(now.getTime() / 1000));
+        this.setHeader(response, 'Retry-After', retryAfter);
+        throw new HttpException(
           `Quota mensuel atteint (${limit.toLocaleString()} req/${consumer.plan}). Passez à un plan supérieur.`,
+          HttpStatus.TOO_MANY_REQUESTS,
         );
       }
     }

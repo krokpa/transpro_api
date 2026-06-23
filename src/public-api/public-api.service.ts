@@ -5,6 +5,25 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PublicApiService {
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * Filtre tenant pour les endpoints publics.
+   * - Consumer lié à une compagnie → accès à SA compagnie uniquement.
+   * - Consumer cross-compagnie (tenantId null) → uniquement les compagnies
+   *   ayant activé l'API publique (opt-in `publicApiEnabled`).
+   */
+  private tenantWhere(tenantId?: string) {
+    return tenantId
+      ? { tenantId }
+      : { tenant: { publicApiEnabled: true } };
+  }
+
+  /** Normalise limit/offset : limit dans [1,100] (défaut 50), offset >= 0. */
+  private paginate(limit?: number, offset?: number) {
+    const take = Math.min(100, Math.max(1, limit ?? 50));
+    const skip = Math.max(0, offset ?? 0);
+    return { take, skip };
+  }
+
   // ── Voyages ────────────────────────────────────────────────────────────────
 
   async searchTrips(params: {
@@ -13,18 +32,21 @@ export class PublicApiService {
     departureDate: string;
     passengers?:   number;
     tenantId?:     string;
+    limit?:        number;
+    offset?:       number;
   }) {
     const date   = new Date(params.departureDate);
     if (isNaN(date.getTime())) throw new BadRequestException('departureDate invalide (YYYY-MM-DD)');
 
     const dayStart = new Date(date); dayStart.setHours(0, 0, 0, 0);
     const dayEnd   = new Date(date); dayEnd.setHours(23, 59, 59, 999);
+    const { take, skip } = this.paginate(params.limit, params.offset);
 
     return this.prisma.trip.findMany({
       where: {
         status:      { in: ['SCHEDULED', 'BOARDING'] },
         departureAt: { gte: dayStart, lte: dayEnd },
-        ...(params.tenantId ? { tenantId: params.tenantId } : {}),
+        ...this.tenantWhere(params.tenantId),
         route: {
           isActive:        true,
           originCity:      { name: { contains: params.origin,      mode: 'insensitive' } },
@@ -46,7 +68,8 @@ export class PublicApiService {
         tenant: { select: { id: true, name: true, slug: true, logo: true } },
       },
       orderBy: { departureAt: 'asc' },
-      take: 50,
+      take,
+      skip,
     });
   }
 
@@ -55,7 +78,7 @@ export class PublicApiService {
       where: {
         id,
         status: { in: ['SCHEDULED', 'BOARDING', 'DEPARTED'] },
-        ...(tenantId ? { tenantId } : {}),
+        ...this.tenantWhere(tenantId),
       },
       select: {
         id: true, departureAt: true, estimatedArrivalAt: true,
@@ -82,9 +105,12 @@ export class PublicApiService {
 
   // ── Gares & Itinéraires ────────────────────────────────────────────────────
 
-  async listStations(tenantId?: string) {
+  async listStations(tenantId?: string, limit?: number, offset?: number) {
+    const { take, skip } = this.paginate(limit, offset);
     return this.prisma.station.findMany({
-      where: { isActive: true, ...(tenantId ? { tenantId } : {}) },
+      take,
+      skip,
+      where: { isActive: true, ...this.tenantWhere(tenantId) },
       select: {
         id: true, name: true, code: true, address: true, latitude: true, longitude: true,
         city:   { select: { name: true, region: true } },
@@ -94,9 +120,12 @@ export class PublicApiService {
     });
   }
 
-  async listRoutes(tenantId?: string) {
+  async listRoutes(tenantId?: string, limit?: number, offset?: number) {
+    const { take, skip } = this.paginate(limit, offset);
     return this.prisma.route.findMany({
-      where: { isActive: true, ...(tenantId ? { tenantId } : {}) },
+      take,
+      skip,
+      where: { isActive: true, ...this.tenantWhere(tenantId) },
       select: {
         id: true, name: true, distanceKm: true, durationMinutes: true, basePrice: true,
         originCity:      { select: { name: true } },
@@ -122,7 +151,7 @@ export class PublicApiService {
       where: {
         id:     dto.tripId,
         status: { in: ['SCHEDULED', 'BOARDING'] },
-        ...(dto.tenantId ? { tenantId: dto.tenantId } : {}),
+        ...this.tenantWhere(dto.tenantId),
       },
     });
     if (!trip) throw new NotFoundException('Voyage introuvable ou non réservable');
@@ -180,7 +209,7 @@ export class PublicApiService {
 
   async getBookingByReference(reference: string, tenantId?: string) {
     const booking = await this.prisma.booking.findFirst({
-      where: { reference, ...(tenantId ? { tenantId } : {}) },
+      where: { reference, ...this.tenantWhere(tenantId) },
       select: {
         id: true, reference: true, status: true,
         totalAmount: true, currency: true, expiresAt: true, confirmedAt: true, createdAt: true,
@@ -203,9 +232,9 @@ export class PublicApiService {
 
   // ── Colis ──────────────────────────────────────────────────────────────────
 
-  async trackParcel(code: string) {
-    const parcel = await this.prisma.parcel.findUnique({
-      where:  { trackingCode: code },
+  async trackParcel(code: string, tenantId?: string) {
+    const parcel = await this.prisma.parcel.findFirst({
+      where:  { trackingCode: code, ...this.tenantWhere(tenantId) },
       select: {
         trackingCode: true, description: true, weightKg: true,
         status: true, declaredValue: true, createdAt: true,

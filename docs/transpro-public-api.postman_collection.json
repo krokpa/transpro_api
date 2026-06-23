@@ -1,0 +1,158 @@
+{
+  "info": {
+    "name": "TransPro — API Partenaires (/ext)",
+    "description": "Collection pour l'API publique tierce TransPro. Renseignez les variables {{baseUrl}} et {{apiKey}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "X-API-Key", "type": "string" },
+      { "key": "value", "value": "{{apiKey}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3001/api/v1" },
+    { "key": "apiKey", "value": "tpk_live_REMPLACEZ_MOI" }
+  ],
+  "item": [
+    {
+      "name": "Voyages",
+      "item": [
+        {
+          "name": "Rechercher des voyages",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ext/trips?origin=Abidjan&destination=Bouake&date=2026-07-01&passengers=1&limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["ext", "trips"],
+              "query": [
+                { "key": "origin", "value": "Abidjan" },
+                { "key": "destination", "value": "Bouake" },
+                { "key": "date", "value": "2026-07-01" },
+                { "key": "passengers", "value": "1" },
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Détails d'un voyage",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ext/trips/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["ext", "trips", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Gares & Itinéraires",
+      "item": [
+        {
+          "name": "Lister les gares",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ext/stations?limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["ext", "stations"],
+              "query": [
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Lister les itinéraires",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ext/routes?limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["ext", "routes"],
+              "query": [
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Réservations",
+      "item": [
+        {
+          "name": "Créer une réservation",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"\",\n  \"passengerName\": \"Awa Kone\",\n  \"passengerPhone\": \"+2250700000000\",\n  \"passengerEmail\": \"awa@example.com\",\n  \"seatNumbers\": [\"A1\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ext/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["ext", "bookings"]
+            }
+          }
+        },
+        {
+          "name": "Récupérer une réservation",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ext/bookings/:reference",
+              "host": ["{{baseUrl}}"],
+              "path": ["ext", "bookings", ":reference"],
+              "variable": [{ "key": "reference", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Colis",
+      "item": [
+        {
+          "name": "Suivre un colis",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ext/parcels/:code",
+              "host": ["{{baseUrl}}"],
+              "path": ["ext", "parcels", ":code"],
+              "variable": [{ "key": "code", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Méta",
+      "item": [
+        {
+          "name": "Mon consumer (/me)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ext/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["ext", "me"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

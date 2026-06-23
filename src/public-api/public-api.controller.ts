@@ -2,7 +2,7 @@ import {
   Controller, Get, Post, Body, Param, Query,
   UseGuards, UseInterceptors, HttpCode, HttpStatus, Req,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiHeader, ApiSecurity } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiHeader, ApiSecurity, ApiQuery } from '@nestjs/swagger';
 import { PublicApiService } from './public-api.service';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
 import { ApiUsageInterceptor } from '../common/interceptors/api-usage.interceptor';
@@ -23,12 +23,16 @@ export class PublicApiController {
   @Get('trips')
   @RequireScope(SCOPE.TRIPS_READ)
   @ApiOperation({ summary: 'Rechercher des voyages disponibles' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Max 100 (défaut 50)' })
+  @ApiQuery({ name: 'offset', required: false, description: 'Décalage de pagination' })
   searchTrips(
     @Query('origin') origin: string,
     @Query('destination') destination: string,
     @Query('date') date: string,
     @Query('passengers') passengers: string,
     @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const tenantId = req.apiConsumer?.tenantId ?? undefined;
     return this.service.searchTrips({
@@ -37,6 +41,8 @@ export class PublicApiController {
       departureDate: date,
       passengers: passengers ? parseInt(passengers, 10) : 1,
       tenantId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
     });
   }
 
@@ -52,15 +58,35 @@ export class PublicApiController {
   @Get('stations')
   @RequireScope(SCOPE.STATIONS_READ)
   @ApiOperation({ summary: 'Lister les gares actives' })
-  listStations(@Req() req: any) {
-    return this.service.listStations(req.apiConsumer?.tenantId ?? undefined);
+  @ApiQuery({ name: 'limit', required: false, description: 'Max 100 (défaut 50)' })
+  @ApiQuery({ name: 'offset', required: false, description: 'Décalage de pagination' })
+  listStations(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.service.listStations(
+      req.apiConsumer?.tenantId ?? undefined,
+      limit ? parseInt(limit, 10) : undefined,
+      offset ? parseInt(offset, 10) : undefined,
+    );
   }
 
   @Get('routes')
   @RequireScope(SCOPE.ROUTES_READ)
   @ApiOperation({ summary: 'Lister les itinéraires actifs' })
-  listRoutes(@Req() req: any) {
-    return this.service.listRoutes(req.apiConsumer?.tenantId ?? undefined);
+  @ApiQuery({ name: 'limit', required: false, description: 'Max 100 (défaut 50)' })
+  @ApiQuery({ name: 'offset', required: false, description: 'Décalage de pagination' })
+  listRoutes(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.service.listRoutes(
+      req.apiConsumer?.tenantId ?? undefined,
+      limit ? parseInt(limit, 10) : undefined,
+      offset ? parseInt(offset, 10) : undefined,
+    );
   }
 
   // ── Réservations ───────────────────────────────────────────────────────────
@@ -97,8 +123,8 @@ export class PublicApiController {
   @Get('parcels/:code')
   @RequireScope(SCOPE.PARCELS_READ)
   @ApiOperation({ summary: 'Suivre un colis par son code de tracking' })
-  trackParcel(@Param('code') code: string) {
-    return this.service.trackParcel(code);
+  trackParcel(@Param('code') code: string, @Req() req: any) {
+    return this.service.trackParcel(code, req.apiConsumer?.tenantId ?? undefined);
   }
 
   // ── Meta ───────────────────────────────────────────────────────────────────
