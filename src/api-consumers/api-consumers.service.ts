@@ -25,6 +25,10 @@ function generateRawKey(): string {
   return `tpk_live_${randomBytes(24).toString('base64url')}`;
 }
 
+function generateWebhookSecret(): string {
+  return `whsec_${randomBytes(24).toString('base64url')}`;
+}
+
 @Injectable()
 export class ApiConsumersService {
   constructor(private prisma: PrismaService) {}
@@ -51,6 +55,7 @@ export class ApiConsumersService {
         plan:        dto.plan ?? ApiPlan.STARTER,
         tenantId:    dto.tenantId,
         webhookUrl:  dto.webhookUrl,
+        webhookSecret: dto.webhookUrl ? generateWebhookSecret() : undefined,
         allowedIps:  dto.allowedIps ?? [],
         notes:       dto.notes,
       },
@@ -103,6 +108,10 @@ export class ApiConsumersService {
         ...(dto.plan       !== undefined && { plan:       dto.plan }),
         ...(dto.status     !== undefined && { status:     dto.status }),
         ...(dto.webhookUrl !== undefined && { webhookUrl: dto.webhookUrl }),
+        // Génère un secret si une URL webhook est définie et qu'aucun n'existe encore.
+        ...(dto.webhookUrl && !consumer.webhookSecret && {
+          webhookSecret: generateWebhookSecret(),
+        }),
         ...(dto.allowedIps !== undefined && { allowedIps: dto.allowedIps }),
         ...(dto.notes      !== undefined && { notes:      dto.notes }),
       },
@@ -214,6 +223,25 @@ export class ApiConsumersService {
       byStatus:     byStatus.map((s) => ({ statusCode: s.statusCode, count: s._count._all })),
       byDay,
     };
+  }
+
+  // ── Webhooks ─────────────────────────────────────────────────────────────────
+
+  async listWebhookDeliveries(consumerId: string, actorRole: string, actorTenantId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId);
+
+    return this.prisma.webhookDelivery.findMany({
+      where: { consumerId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        id: true, event: true, url: true, status: true, attempts: true,
+        statusCode: true, lastError: true, nextRetryAt: true,
+        deliveredAt: true, createdAt: true,
+      },
+    });
   }
 
   // ── Accès ──────────────────────────────────────────────────────────────────

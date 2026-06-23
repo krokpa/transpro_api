@@ -1,9 +1,15 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class PublicApiService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(PublicApiService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private payments: PaymentsService,
+  ) {}
 
   /**
    * Filtre tenant pour les endpoints publics.
@@ -145,6 +151,7 @@ export class PublicApiService {
     passengerName:   string;
     seatNumbers:     string[];
     tenantId?:       string;
+    apiConsumerId?:  string;
   }) {
     // Charger le voyage
     const trip = await this.prisma.trip.findFirst({
@@ -191,6 +198,7 @@ export class PublicApiService {
         currency:    'XOF',
         expiresAt,
         status:      'PENDING',
+        apiConsumerId: dto.apiConsumerId,
       },
       select: {
         id: true, reference: true, status: true,
@@ -204,7 +212,24 @@ export class PublicApiService {
       },
     });
 
-    return booking;
+    // Initie le paiement et renvoie le lien de checkout au tiers.
+    // En cas d'échec (provider indisponible), la réservation reste PENDING et
+    // expire ; le tiers peut relancer le paiement via /bookings/:ref/pay (à venir).
+    let payment: { url: string | null; reference: string | null; expiresAt: Date } = {
+      url: null,
+      reference: null,
+      expiresAt: booking.expiresAt!,
+    };
+    try {
+      const res = await this.payments.initiate(booking.id, passenger.id);
+      payment = { url: res.checkoutUrl, reference: res.reference, expiresAt: booking.expiresAt! };
+    } catch (err) {
+      this.logger.warn(
+        `Paiement non initié pour la réservation API ${booking.reference}: ${(err as Error).message}`,
+      );
+    }
+
+    return { ...booking, payment };
   }
 
   async getBookingByReference(reference: string, tenantId?: string) {

@@ -75,6 +75,16 @@ export class ApiConsumersController {
     return this.service.getUsageStats(id, role, tenantId);
   }
 
+  @Get(':id/webhooks')
+  @ApiOperation({ summary: 'Dernières livraisons de webhooks d\'un consommateur' })
+  webhookDeliveries(
+    @Param('id') id: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.service.listWebhookDeliveries(id, role, tenantId);
+  }
+
   // ── Clés API ───────────────────────────────────────────────────────────────
 
   @Post(':id/keys')

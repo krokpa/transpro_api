@@ -11,6 +11,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PushService } from '../push/push.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookEvent } from '@prisma/client';
 import { SocketEvent, COMMISSION_RATE, GENIUS_PAY_RATE, NotificationType, PaymentMethod } from '@transpro/shared';
 import { generateReference } from '@transpro/shared';
 import axios from 'axios';
@@ -30,6 +32,7 @@ export class PaymentsService {
     private notifications: NotificationsService,
     private config: ConfigService,
     private push: PushService,
+    private webhooks: WebhooksService,
   ) {
     const key = this.config.get<string>('ENCRYPTION_KEY');
     if (!key) throw new Error('[PaymentsService] ENCRYPTION_KEY manquante — démarrage refusé');
@@ -321,6 +324,19 @@ export class PaymentsService {
       bookingId,
       tripId: booking.tripId,
     });
+
+    // Webhook API tierce : notifier le consumer qui a créé la réservation via /ext.
+    if ((booking as any).apiConsumerId) {
+      this.webhooks.emitToConsumer((booking as any).apiConsumerId, WebhookEvent.BOOKING_CONFIRMED, {
+        bookingId,
+        reference: booking.reference,
+        status: 'CONFIRMED',
+        tripId: booking.tripId,
+        seatNumbers: booking.seatNumbers,
+        totalAmount: booking.totalAmount,
+        confirmedAt: paidAt.toISOString(),
+      }).catch(() => {});
+    }
 
     // Web push dashboard : alerter le staff d'une nouvelle réservation confirmée
     this.push.sendWebPushToTenant(booking.tenantId, {

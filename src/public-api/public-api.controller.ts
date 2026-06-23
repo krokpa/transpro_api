@@ -108,6 +108,7 @@ export class PublicApiController {
     return this.service.createBooking({
       ...body,
       tenantId: req.apiConsumer?.tenantId ?? undefined,
+      apiConsumerId: req.apiConsumer?.id,
     });
   }
 
