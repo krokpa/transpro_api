@@ -90,7 +90,7 @@ async function bootstrap() {
     },
   );
 
-  const port = config.get<number>('API_PORT', 3001);
+  const port = parseInt(process.env.PORT ?? '', 10) || config.get<number>('API_PORT', 3001);
   await app.listen(port, '0.0.0.0');
   console.log(`TransPro API running on http://localhost:${port}`);
   console.log(`Swagger docs: http://localhost:${port}/docs`);
