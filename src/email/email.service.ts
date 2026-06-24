@@ -134,6 +134,51 @@ export class EmailService {
     });
   }
 
+  async sendApiPlanPaymentSuccess(
+    to: string, name: string, plan: string, amount: number, endDate: Date, dashboardUrl: string,
+  ) {
+    await this.send({
+      to,
+      subject: `Paiement confirmé — Plan API ${plan} TransPro CI`,
+      html: this.base(`
+        <p>Bonjour <strong>${name}</strong>,</p>
+        <p>Votre paiement pour le <strong>plan API ${plan}</strong> a bien été reçu. Votre accès est actif.</p>
+        <div class="info-box">
+          <div class="info-row"><span class="label">Plan</span><span class="value">${plan}</span></div>
+          <div class="info-row"><span class="label">Montant</span><span class="value">${amount.toLocaleString('fr-FR')} FCFA</span></div>
+          <div class="info-row"><span class="label">Valable jusqu'au</span><span class="value">${endDate.toLocaleDateString('fr-FR')}</span></div>
+        </div>
+        <p style="text-align:center"><a href="${dashboardUrl}" class="btn">Gérer mon intégration</a></p>
+      `),
+    });
+  }
+
+  async sendApiProductionApproved(to: string, name: string, dashboardUrl: string) {
+    await this.send({
+      to,
+      subject: 'Accès production API activé — TransPro CI',
+      html: this.base(`
+        <p>Bonjour <strong>${name}</strong>,</p>
+        <p>Bonne nouvelle : votre demande d'<strong>accès production</strong> a été approuvée. Vous pouvez désormais générer des clés <strong>LIVE</strong> (tpk_live_).</p>
+        <p style="text-align:center"><a href="${dashboardUrl}" class="btn">Créer une clé production</a></p>
+      `),
+    });
+  }
+
+  async sendApiProductionRejected(to: string, name: string, reason: string, dashboardUrl: string) {
+    await this.send({
+      to,
+      subject: 'Demande d\'accès production refusée — TransPro CI',
+      html: this.base(`
+        <p>Bonjour <strong>${name}</strong>,</p>
+        <p>Votre demande d'accès production n'a pas été approuvée.</p>
+        <div class="info-box"><div class="info-row"><span class="label">Motif</span><span class="value">${reason}</span></div></div>
+        <p>Vous pouvez corriger les points soulevés puis refaire une demande depuis votre espace.</p>
+        <p style="text-align:center"><a href="${dashboardUrl}" class="btn">Retour à mon intégration</a></p>
+      `),
+    });
+  }
+
   async sendParcelCreated(to: string, params: {
     senderName: string;
     trackingCode: string;

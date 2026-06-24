@@ -5,8 +5,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
+import { EmailService } from '../email/email.service';
 import {
   API_PLAN_LIMITS,
   API_PLAN_SCOPES,
@@ -37,6 +39,8 @@ export class ApiConsumersService {
   constructor(
     private prisma: PrismaService,
     private billing: BillingService,
+    private email: EmailService,
+    private config: ConfigService,
   ) {}
 
   // ── Consumers ──────────────────────────────────────────────────────────────
@@ -315,7 +319,7 @@ export class ApiConsumersService {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
 
-    return this.prisma.apiConsumer.update({
+    const updated = await this.prisma.apiConsumer.update({
       where: { id: consumerId },
       data: {
         accessStatus: approve ? 'APPROVED' : 'REJECTED',
@@ -323,6 +327,17 @@ export class ApiConsumersService {
         prodRejectionReason: approve ? null : (reason ?? 'Non précisé'),
       },
     });
+
+    if (consumer.email) {
+      const appUrl = this.config.get('FRONTEND_URL') || this.config.get('APP_URL') || 'http://localhost:3000';
+      const dashUrl = `${appUrl}/dashboard/developers`;
+      const send = approve
+        ? this.email.sendApiProductionApproved(consumer.email, consumer.name, dashUrl)
+        : this.email.sendApiProductionRejected(consumer.email, consumer.name, reason ?? 'Non précisé', dashUrl);
+      send.catch(() => {});
+    }
+
+    return updated;
   }
 
   // ── Webhooks ─────────────────────────────────────────────────────────────────

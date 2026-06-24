@@ -272,6 +272,18 @@ export class BillingService {
       }),
     ]);
     this.logger.log(`API plan confirmed: consumer=${payment.consumerId} plan=${payment.plan}`);
+
+    const consumer = await this.prisma.apiConsumer.findUnique({
+      where: { id: payment.consumerId },
+      select: { email: true, name: true },
+    });
+    if (consumer?.email) {
+      const appUrl = this.config.get('FRONTEND_URL') || this.config.get('APP_URL') || 'http://localhost:3000';
+      await this.email.sendApiPlanPaymentSuccess(
+        consumer.email, consumer.name, payment.plan, payment.amount, payment.endDate,
+        `${appUrl}/dashboard/developers`,
+      ).catch((e) => this.logger.error('Failed to send API plan email', e));
+    }
   }
 
   private async confirmSubscriptionPayment(providerRef: string, paymentChannel?: string) {
