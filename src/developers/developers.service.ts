@@ -66,6 +66,7 @@ export class DevelopersService {
         plan: 'STARTER',
         accessStatus: 'SANDBOX',
         ownerUserId: user.id,
+        termsAcceptedAt: new Date(),
         allowedIps: [],
       },
     });
