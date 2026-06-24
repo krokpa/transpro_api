@@ -44,6 +44,7 @@ import { PromotionsModule } from './promotions/promotions.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { RedisModule } from './common/redis/redis.module';
 import { DevelopersModule } from './developers/developers.module';
+import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { PaymentRedirectController } from './payment-redirect.controller';
 
@@ -107,6 +108,7 @@ import { PaymentRedirectController } from './payment-redirect.controller';
     WebhooksModule,
     RedisModule,
     DevelopersModule,
+    PlatformSettingsModule,
   ],
 })
 export class AppModule implements NestModule {
