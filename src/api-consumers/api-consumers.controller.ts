@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Body, Param, UseGuards, HttpCode, HttpStatus,
+  Body, Param, UseGuards, HttpCode, HttpStatus, Res,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ApiConsumersService } from './api-consumers.service';
@@ -118,6 +118,33 @@ export class ApiConsumersController {
     @CurrentUser('id') userId: string,
   ) {
     return this.service.confirmPlanFromRedirect(id, paymentId, role, tenantId, userId);
+  }
+
+  @Get(':id/billing/invoices')
+  @ApiOperation({ summary: 'Historique des factures (paiements de plan)' })
+  invoices(
+    @Param('id') id: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.listInvoices(id, role, tenantId, userId);
+  }
+
+  @Get(':id/billing/invoices/:paymentId/pdf')
+  @ApiOperation({ summary: 'Télécharger la facture PDF d\'un paiement' })
+  async invoicePdf(
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
+    @Res() reply: any,
+  ) {
+    const { buffer, filename, mimetype } = await this.service.getInvoicePdf(id, paymentId, role, tenantId, userId);
+    reply.header('Content-Type', mimetype);
+    reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+    reply.send(buffer);
   }
 
   @Get(':id/usage')

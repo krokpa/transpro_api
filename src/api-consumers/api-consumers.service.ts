@@ -343,6 +343,22 @@ export class ApiConsumersService {
     return this.billing.confirmApiPlanFromRedirect(paymentId, consumerId);
   }
 
+  /** Historique des factures (paiements de plan payés). */
+  async listInvoices(consumerId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
+    return this.billing.listApiPlanPayments(consumerId);
+  }
+
+  /** Facture PDF d'un paiement (buffer). */
+  async getInvoicePdf(consumerId: string, paymentId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
+    return this.billing.generateApiPlanInvoice(paymentId, consumerId);
+  }
+
   // ── Activation production (modèle hybride) ───────────────────────────────────
 
   /** L'owner demande l'activation de l'accès production (clés LIVE). */

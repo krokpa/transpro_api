@@ -12,6 +12,7 @@ import { TenantPlan, PLAN_PRICING, getPlanFeatures, ApiPlan, API_PLAN_PRICING } 
 import { generateReference } from '@transpro/shared';
 
 const GENIUSPAY_BASE = 'https://pay.genius.ci/api/v1/merchant';
+const PDFDoc = require('pdfkit') as typeof import('pdfkit');
 
 @Injectable()
 export class BillingService {
@@ -284,6 +285,89 @@ export class BillingService {
         `${appUrl}/dashboard/developers`,
       ).catch((e) => this.logger.error('Failed to send API plan email', e));
     }
+  }
+
+  /** Liste les paiements de plan API payés d'un consumer (historique de factures). */
+  async listApiPlanPayments(consumerId: string) {
+    return this.prisma.apiPlanPayment.findMany({
+      where: { consumerId, isPaid: true },
+      orderBy: { paidAt: 'desc' },
+      select: { id: true, plan: true, amount: true, paidAt: true, startDate: true, endDate: true, paymentMethod: true },
+    });
+  }
+
+  /** Génère la facture PDF d'un paiement de plan API. */
+  async generateApiPlanInvoice(paymentId: string, consumerId: string) {
+    const payment = await this.prisma.apiPlanPayment.findFirst({
+      where: { id: paymentId, consumerId, isPaid: true },
+      include: { consumer: { select: { name: true, email: true, companyName: true } } },
+    });
+    if (!payment) throw new NotFoundException('Facture introuvable');
+
+    const settings = await this.prisma.platformSettings.findUnique({ where: { id: 'singleton' } });
+    const appName = settings?.appName ?? 'TransPro CI';
+    const fmtDate = (d: Date | null) => (d ? dayjs(d).format('DD/MM/YYYY') : '—');
+    const fmtAmount = (n: number) => `${n.toLocaleString('fr-FR')} FCFA`;
+    const invoiceNo = `INV-${payment.id.slice(-8).toUpperCase()}`;
+
+    const doc = new PDFDoc({ size: 'A4', margin: 50 });
+    const chunks: Buffer[] = [];
+    const done = new Promise<Buffer>((resolve, reject) => {
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+    });
+
+    const BRAND = '#0F172A';
+    const GRAY = '#64748B';
+
+    // En-tête
+    doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(22).text(appName, 50, 50);
+    doc.fillColor(GRAY).font('Helvetica').fontSize(10).text('API Partenaires', 50, 78);
+    doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(20).text('FACTURE', 0, 50, { align: 'right' });
+    doc.fillColor(GRAY).font('Helvetica').fontSize(10)
+      .text(invoiceNo, 0, 78, { align: 'right' })
+      .text(`Payée le ${fmtDate(payment.paidAt)}`, 0, 92, { align: 'right' });
+
+    doc.moveTo(50, 120).lineTo(545, 120).strokeColor('#E2E8F0').stroke();
+
+    // Facturé à
+    doc.fillColor(GRAY).font('Helvetica-Bold').fontSize(9).text('FACTURÉ À', 50, 140);
+    doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(12).text(payment.consumer.name, 50, 154);
+    doc.fillColor(GRAY).font('Helvetica').fontSize(10);
+    if (payment.consumer.companyName) doc.text(payment.consumer.companyName, 50, 170);
+    doc.text(payment.consumer.email, 50, payment.consumer.companyName ? 184 : 170);
+
+    // Tableau ligne
+    const tableY = 230;
+    doc.fillColor(BRAND).rect(50, tableY, 495, 24).fill();
+    doc.fillColor('#fff').font('Helvetica-Bold').fontSize(9);
+    doc.text('DESCRIPTION', 60, tableY + 8);
+    doc.text('PÉRIODE', 320, tableY + 8);
+    doc.text('MONTANT', 0, tableY + 8, { align: 'right', width: 535 });
+
+    const rowY = tableY + 24;
+    doc.fillColor(BRAND).font('Helvetica').fontSize(10);
+    doc.text(`Plan API ${payment.plan}`, 60, rowY + 8, { width: 250 });
+    doc.fillColor(GRAY).fontSize(9).text(`${fmtDate(payment.startDate)} → ${fmtDate(payment.endDate)}`, 320, rowY + 9);
+    doc.fillColor(BRAND).fontSize(10).text(fmtAmount(payment.amount), 0, rowY + 8, { align: 'right', width: 535 });
+
+    doc.moveTo(50, rowY + 32).lineTo(545, rowY + 32).strokeColor('#E2E8F0').stroke();
+
+    // Total
+    const totalY = rowY + 48;
+    doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(12).text('TOTAL', 350, totalY);
+    doc.text(fmtAmount(payment.amount), 0, totalY, { align: 'right', width: 535 });
+    doc.fillColor(GRAY).font('Helvetica').fontSize(9)
+      .text(`Méthode : ${payment.paymentMethod ?? 'Genius Pay'}`, 350, totalY + 22);
+
+    // Pied
+    doc.fillColor(GRAY).font('Helvetica').fontSize(8)
+      .text(`${appName} — Facture générée automatiquement. Aucune signature requise.`, 50, 780, { align: 'center', width: 495 });
+
+    doc.end();
+    const buffer = await done;
+    return { buffer, filename: `${invoiceNo}.pdf`, mimetype: 'application/pdf' };
   }
 
   private async confirmSubscriptionPayment(providerRef: string, paymentChannel?: string) {
