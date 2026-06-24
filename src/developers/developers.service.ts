@@ -1,7 +1,10 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, ConflictException, BadRequestException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { nanoid } from 'nanoid';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { EmailService } from '../email/email.service';
+import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@transpro/shared';
 import { RegisterDeveloperDto } from './dto/register-developer.dto';
 
@@ -10,7 +13,20 @@ export class DevelopersService {
   constructor(
     private prisma: PrismaService,
     private auth: AuthService,
+    private email: EmailService,
+    private config: ConfigService,
   ) {}
+
+  /** Crée un token de vérification email et envoie le lien. */
+  private async sendVerification(userId: string, email: string, name: string) {
+    await this.prisma.emailVerificationToken.deleteMany({ where: { userId } });
+    const token = nanoid(48);
+    await this.prisma.emailVerificationToken.create({
+      data: { userId, token, expiresAt: new Date(Date.now() + 24 * 3600 * 1000) },
+    });
+    const appUrl = this.config.get('FRONTEND_URL') || this.config.get('APP_URL') || 'http://localhost:3000';
+    await this.email.sendEmailVerification(email, name, `${appUrl}/developer/verify?token=${token}`).catch(() => {});
+  }
 
   /**
    * Inscription self-service d'un développeur tiers (hors compagnie).
@@ -54,7 +70,31 @@ export class DevelopersService {
       },
     });
 
+    await this.sendVerification(user.id, email, firstName);
+
     // Connexion immédiate : renvoie { user, accessToken, refreshToken }.
     return this.auth.login({ email, password: dto.password });
+  }
+
+  /** Vérifie l'email via le token reçu par lien. */
+  async verifyEmail(token: string) {
+    const record = await this.prisma.emailVerificationToken.findUnique({ where: { token } });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('Lien de vérification invalide ou expiré.');
+    }
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: record.userId }, data: { isVerified: true } }),
+      this.prisma.emailVerificationToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+    ]);
+    return { verified: true };
+  }
+
+  /** Renvoie un email de vérification au développeur connecté. */
+  async resendVerification(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+    if (user.isVerified) return { alreadyVerified: true };
+    await this.sendVerification(user.id, user.email, user.firstName);
+    return { sent: true };
   }
 }

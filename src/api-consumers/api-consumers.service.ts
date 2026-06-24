@@ -358,6 +358,17 @@ export class ApiConsumersService {
       throw new ConflictException('Demande déjà en attente de validation.');
     }
 
+    // Un développeur externe doit avoir vérifié son email avant la demande prod.
+    if (consumer.ownerUserId) {
+      const owner = await this.prisma.user.findUnique({
+        where: { id: consumer.ownerUserId },
+        select: { isVerified: true },
+      });
+      if (owner && !owner.isVerified) {
+        throw new ForbiddenException('Vérifiez votre email avant de demander l’accès production.');
+      }
+    }
+
     return this.prisma.apiConsumer.update({
       where: { id: consumerId },
       data: {

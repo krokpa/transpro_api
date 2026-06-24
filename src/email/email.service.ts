@@ -153,6 +153,20 @@ export class EmailService {
     });
   }
 
+  async sendEmailVerification(to: string, name: string, verifyUrl: string) {
+    await this.send({
+      to,
+      subject: 'Vérifiez votre email — Espace Développeur TransPro',
+      html: this.base(`
+        <p>Bonjour <strong>${name}</strong>,</p>
+        <p>Bienvenue ! Confirmez votre adresse email pour finaliser votre compte développeur et débloquer la demande d'accès production.</p>
+        <p style="text-align:center"><a href="${verifyUrl}" class="btn">Vérifier mon email</a></p>
+        <p style="font-size:13px;color:#6b7280">Ce lien expire dans <strong>24 heures</strong>. Vous pouvez déjà utiliser le sandbox sans vérification.</p>
+        <p style="font-size:13px;color:#9ca3af;word-break:break-all">Ou copiez ce lien : ${verifyUrl}</p>
+      `),
+    });
+  }
+
   async sendApiPlanExpiringSoon(to: string, name: string, plan: string, daysAhead: number, dashboardUrl: string) {
     await this.send({
       to,
