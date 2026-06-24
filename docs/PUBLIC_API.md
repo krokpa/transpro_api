@@ -185,7 +185,17 @@ Envoie un événement d'exemple signé vers votre `webhookUrl`. Réservé aux cl
 
 ---
 
-## 9. Versioning
+## 9. SDK & génération de clients
+
+- **SDK TypeScript officiel** (sans dépendance) : `docs/sdk/transpro.ts` — client typé
+  pour tous les endpoints `/ext` + `verifyWebhookSignature`. Voir `docs/sdk/README.md`.
+- **OpenAPI 3.0** servie publiquement à **`/developers-json`** — générez un client dans
+  n'importe quel langage avec [openapi-generator](https://openapi-generator.tech/) :
+  ```bash
+  openapi-generator-cli generate -i https://api.transpro.ci/developers-json -g python -o ./sdk-py
+  ```
+
+## 10. Versioning
 
 L'API est versionnée par URL (`/api/v1`). Les changements incompatibles
 introduiront `/api/v2` avec une période de dépréciation annoncée.

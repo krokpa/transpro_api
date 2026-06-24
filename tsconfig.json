@@ -24,5 +24,6 @@
       "@transpro/database": ["../../packages/database/src"]
     },
     "types": ["jest", "node"]
-  }
+  },
+  "exclude": ["node_modules", "dist", "docs"]
 }
