@@ -122,6 +122,18 @@ export class ApiConsumersController {
     return this.service.getUsageStats(id, role, tenantId);
   }
 
+  @Post(':id/webhooks/:deliveryId/resend')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Relancer une livraison de webhook' })
+  resendWebhook(
+    @Param('id') id: string,
+    @Param('deliveryId') deliveryId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.service.resendWebhook(id, deliveryId, role, tenantId);
+  }
+
   @Get(':id/webhooks')
   @ApiOperation({ summary: 'Dernières livraisons de webhooks d\'un consommateur' })
   webhookDeliveries(

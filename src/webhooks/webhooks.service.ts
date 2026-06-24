@@ -155,6 +155,15 @@ export class WebhooksService {
     }
   }
 
+  /** Relance manuellement une livraison (réinitialise puis ré-essaie immédiatement). */
+  async resend(deliveryId: string): Promise<void> {
+    await this.prisma.webhookDelivery.update({
+      where: { id: deliveryId },
+      data: { status: 'PENDING', nextRetryAt: null },
+    });
+    await this.attemptDelivery(deliveryId);
+  }
+
   /** Vérifie une signature entrante (utilitaire pour les consumers / tests). */
   static verifySignature(secret: string, timestamp: string, body: string, signature: string): boolean {
     const expected = createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');

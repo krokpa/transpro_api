@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
 import { EmailService } from '../email/email.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 import {
   API_PLAN_LIMITS,
   API_PLAN_SCOPES,
@@ -41,6 +42,7 @@ export class ApiConsumersService {
     private billing: BillingService,
     private email: EmailService,
     private config: ConfigService,
+    private webhooks: WebhooksService,
   ) {}
 
   // ── Consumers ──────────────────────────────────────────────────────────────
@@ -403,6 +405,22 @@ export class ApiConsumersService {
         deliveredAt: true, createdAt: true,
       },
     });
+  }
+
+  /** Relance manuellement une livraison de webhook du consumer. */
+  async resendWebhook(consumerId: string, deliveryId: string, actorRole: string, actorTenantId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId);
+
+    const delivery = await this.prisma.webhookDelivery.findFirst({
+      where: { id: deliveryId, consumerId },
+      select: { id: true },
+    });
+    if (!delivery) throw new NotFoundException('Livraison introuvable');
+
+    await this.webhooks.resend(deliveryId);
+    return { queued: true };
   }
 
   // ── Accès ──────────────────────────────────────────────────────────────────
