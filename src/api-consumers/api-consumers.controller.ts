@@ -88,6 +88,30 @@ export class ApiConsumersController {
     return this.service.reviewProduction(id, dto.approve, role, dto.reason);
   }
 
+  @Post(':id/billing/subscribe')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Souscrire/changer le plan (Genius Pay pour les plans payants)' })
+  subscribePlan(
+    @Param('id') id: string,
+    @Body() dto: { plan: string },
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.service.subscribePlan(id, dto.plan, role, tenantId);
+  }
+
+  @Post(':id/billing/confirm/:paymentId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirmer un paiement de plan depuis la redirection' })
+  confirmPlan(
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.service.confirmPlanFromRedirect(id, paymentId, role, tenantId);
+  }
+
   @Get(':id/usage')
   @ApiOperation({ summary: 'Statistiques d\'usage mensuel d\'un consommateur' })
   usage(

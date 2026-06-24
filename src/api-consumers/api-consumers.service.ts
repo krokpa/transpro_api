@@ -6,9 +6,11 @@ import {
 } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { BillingService } from '../billing/billing.service';
 import {
   API_PLAN_LIMITS,
   API_PLAN_SCOPES,
+  API_PLAN_PRICING,
   ApiPlan,
   ApiScope,
   UserRole,
@@ -32,7 +34,10 @@ function generateWebhookSecret(): string {
 
 @Injectable()
 export class ApiConsumersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private billing: BillingService,
+  ) {}
 
   // ── Consumers ──────────────────────────────────────────────────────────────
 
@@ -235,6 +240,41 @@ export class ApiConsumersService {
       byStatus:     byStatus.map((s) => ({ statusCode: s.statusCode, count: s._count._all })),
       byDay,
     };
+  }
+
+  // ── Facturation des plans (Genius Pay) ───────────────────────────────────────
+
+  /** Souscrit/upgrade le plan d'un consumer. Starter = gratuit ; sinon Genius Pay. */
+  async subscribePlan(consumerId: string, plan: string, actorRole: string, actorTenantId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId);
+
+    if (!(plan in API_PLAN_PRICING)) {
+      throw new ConflictException('Plan inconnu.');
+    }
+
+    // Starter (gratuit) : appliqué immédiatement, sans paiement.
+    if (plan === ApiPlan.STARTER || API_PLAN_PRICING[plan as ApiPlan].priceMonthly <= 0) {
+      await this.prisma.apiConsumer.update({
+        where: { id: consumerId },
+        data: { plan: plan as ApiPlan, planExpiresAt: null },
+      });
+      return { free: true, plan };
+    }
+
+    return this.billing.initiateApiPlanPayment(
+      { id: consumer.id, name: consumer.name, email: consumer.email, plan: consumer.plan },
+      plan as ApiPlan,
+    );
+  }
+
+  /** Confirme un paiement de plan depuis la redirection post-paiement. */
+  async confirmPlanFromRedirect(consumerId: string, paymentId: string, actorRole: string, actorTenantId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId);
+    return this.billing.confirmApiPlanFromRedirect(paymentId, consumerId);
   }
 
   // ── Activation production (modèle hybride) ───────────────────────────────────

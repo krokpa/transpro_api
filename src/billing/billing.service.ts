@@ -8,7 +8,7 @@ import dayjs from 'dayjs';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
-import { TenantPlan, PLAN_PRICING, getPlanFeatures } from '@transpro/shared';
+import { TenantPlan, PLAN_PRICING, getPlanFeatures, ApiPlan, API_PLAN_PRICING } from '@transpro/shared';
 import { generateReference } from '@transpro/shared';
 
 const GENIUSPAY_BASE = 'https://pay.genius.ci/api/v1/merchant';
@@ -139,11 +139,16 @@ export class BillingService {
       return { received: true };
     }
 
-    this.logger.log(`[SubWebhook] ref=${ref} status=${status}`);
+    this.logger.log(`[SubWebhook] ref=${ref} status=${status} kind=${meta?.kind ?? 'subscription'}`);
 
+    const isApiPlan = meta?.kind === 'api_plan';
     if (status === 'success' || status === 'SUCCESSFUL') {
-      await this.confirmSubscriptionPayment(ref, meta?.paymentChannel ?? body?.data?.payment_channel);
-    } else if (status === 'failed' || status === 'FAILED') {
+      if (isApiPlan) {
+        await this.confirmApiPlanPayment(ref, meta?.paymentChannel ?? body?.data?.payment_channel);
+      } else {
+        await this.confirmSubscriptionPayment(ref, meta?.paymentChannel ?? body?.data?.payment_channel);
+      }
+    } else if ((status === 'failed' || status === 'FAILED') && !isApiPlan) {
       await this.handleFailedSubscriptionPayment(ref);
     }
 
@@ -172,6 +177,101 @@ export class BillingService {
       this.logger.error('Error checking subscription payment status', err);
       return { status: 'UNKNOWN' };
     }
+  }
+
+  // ── Facturation des plans API (Genius Pay) ───────────────────────────────
+
+  /** Initie le paiement d'un plan API payant via Genius Pay. */
+  async initiateApiPlanPayment(
+    consumer: { id: string; name: string; email: string; plan: string },
+    plan: ApiPlan,
+  ) {
+    const amount = API_PLAN_PRICING[plan].priceMonthly;
+    if (amount <= 0) throw new BadRequestException('Ce plan est gratuit.');
+
+    const startDate = dayjs().toDate();
+    const endDate   = dayjs().add(1, 'month').toDate();
+    const transactionId = generateReference('APIPLAN');
+    const appUrl = this.config.get('FRONTEND_URL') || this.config.get('APP_URL') || 'http://localhost:3000';
+
+    let geniusRes: any;
+    try {
+      geniusRes = await this.callGeniusPay({
+        amount,
+        description: `Plan API ${API_PLAN_PRICING[plan].label} — ${consumer.name}`,
+        customer: { name: consumer.name, email: consumer.email, phone: '' },
+        successUrl: `${appUrl}/dashboard/developers?billing=success`,
+        errorUrl:   `${appUrl}/dashboard/developers?billing=error`,
+        metadata: { transactionId, kind: 'api_plan', consumerId: consumer.id, plan },
+      });
+    } catch (err) {
+      this.logger.error(`GeniusPay API plan init failed for consumer ${consumer.id}`, err);
+      throw new BadRequestException('Erreur lors de l\'initiation du paiement. Réessayez.');
+    }
+    if (!geniusRes?.checkout_url) {
+      throw new BadRequestException('Lien de paiement non reçu du prestataire');
+    }
+
+    const payment = await this.prisma.apiPlanPayment.create({
+      data: {
+        consumerId: consumer.id,
+        plan,
+        amount,
+        startDate,
+        endDate,
+        isPaid: false,
+        providerRef: geniusRes.reference,
+        providerData: geniusRes,
+        checkoutUrl: geniusRes.checkout_url,
+      },
+    });
+
+    return { checkoutUrl: geniusRes.checkout_url, paymentId: payment.id };
+  }
+
+  /** Confirmation manuelle d'un paiement de plan API depuis la redirection. */
+  async confirmApiPlanFromRedirect(paymentId: string, consumerId: string) {
+    const payment = await this.prisma.apiPlanPayment.findFirst({
+      where: { id: paymentId, consumerId },
+    });
+    if (!payment) throw new NotFoundException('Paiement introuvable');
+    if (payment.isPaid) return { status: 'SUCCESS', alreadyConfirmed: true };
+    if (!payment.providerRef) throw new BadRequestException('Aucune référence fournisseur');
+
+    try {
+      const res = await this.checkGeniusPayStatus(payment.providerRef);
+      const status = res?.status ?? res?.data?.status;
+      if (status === 'success' || status === 'SUCCESSFUL') {
+        await this.confirmApiPlanPayment(payment.providerRef, res?.data?.payment_channel);
+        return { status: 'SUCCESS' };
+      }
+      return { status: 'PENDING' };
+    } catch (err) {
+      this.logger.error('Error checking API plan payment status', err);
+      return { status: 'UNKNOWN' };
+    }
+  }
+
+  private async confirmApiPlanPayment(providerRef: string, paymentChannel?: string) {
+    const payment = await this.prisma.apiPlanPayment.findFirst({
+      where: { providerRef, isPaid: false },
+    });
+    if (!payment) {
+      this.logger.warn(`[ApiPlanWebhook] payment not found or already paid for ref=${providerRef}`);
+      return;
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.apiPlanPayment.update({
+        where: { id: payment.id },
+        data: { isPaid: true, paidAt: new Date(), paymentMethod: paymentChannel, checkoutUrl: null },
+      }),
+      this.prisma.apiConsumer.update({
+        where: { id: payment.consumerId },
+        data: { plan: payment.plan, planExpiresAt: payment.endDate },
+      }),
+    ]);
+    this.logger.log(`API plan confirmed: consumer=${payment.consumerId} plan=${payment.plan}`);
   }
 
   private async confirmSubscriptionPayment(providerRef: string, paymentChannel?: string) {
@@ -314,7 +414,23 @@ export class BillingService {
     await Promise.all([
       this.processTrials(now),
       this.processSubscriptions(now),
+      this.processApiPlans(now),
     ]);
+  }
+
+  /** Rétrograde les plans API payants expirés vers Starter. */
+  private async processApiPlans(now: dayjs.Dayjs) {
+    const expired = await this.prisma.apiConsumer.findMany({
+      where: { planExpiresAt: { lt: now.toDate() }, NOT: { plan: 'STARTER' } },
+      select: { id: true },
+    });
+    for (const c of expired) {
+      await this.prisma.apiConsumer.update({
+        where: { id: c.id },
+        data: { plan: 'STARTER', planExpiresAt: null },
+      });
+      this.logger.warn(`API consumer ${c.id} plan expired → downgraded to STARTER`);
+    }
   }
 
   /** Token cleanup — every day at 02:00 */
