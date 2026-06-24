@@ -254,7 +254,8 @@ export class ApiConsumersService {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const limit      = API_PLAN_LIMITS[consumer.plan];
 
-    const [totalThisMonth, byEndpoint, byDay, byStatus] = await Promise.all([
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    const [totalThisMonth, byEndpoint, byDayRaw, byStatus] = await Promise.all([
       this.prisma.apiUsageLog.count({
         where: { consumerId, createdAt: { gte: monthStart } },
       }),
@@ -265,11 +266,12 @@ export class ApiConsumersService {
         orderBy: { _count: { endpoint: 'desc' } },
         take: 10,
       }),
-      this.prisma.apiUsageLog.groupBy({
-        by: ['createdAt'],
-        where: { consumerId, createdAt: { gte: new Date(Date.now() - 30 * 24 * 3600 * 1000) } },
-        _count: { _all: true },
-      }),
+      // Agrégation journalière (30 derniers jours) via SQL brut.
+      this.prisma.$queryRaw<Array<{ day: Date; count: number }>>`
+        SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::int AS count
+        FROM api_usage_logs
+        WHERE "consumerId" = ${consumerId} AND "createdAt" >= ${thirtyDaysAgo}
+        GROUP BY day ORDER BY day ASC`,
       this.prisma.apiUsageLog.groupBy({
         by: ['statusCode'],
         where: { consumerId, createdAt: { gte: monthStart } },
@@ -277,6 +279,10 @@ export class ApiConsumersService {
         orderBy: { _count: { statusCode: 'desc' } },
       }),
     ]);
+    const byDay = byDayRaw.map((r) => ({
+      day: (r.day instanceof Date ? r.day : new Date(r.day)).toISOString().slice(0, 10),
+      count: Number(r.count),
+    }));
 
     const quotaPercent = limit === Infinity ? 0 : Math.round((totalThisMonth / limit) * 100);
 
