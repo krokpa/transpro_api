@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
 import { EmailService } from '../email/email.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
+import { AuditService } from '../common/audit/audit.service';
 import {
   API_PLAN_LIMITS,
   API_PLAN_SCOPES,
@@ -43,6 +44,7 @@ export class ApiConsumersService {
     private email: EmailService,
     private config: ConfigService,
     private webhooks: WebhooksService,
+    private audit: AuditService,
   ) {}
 
   // ── Consumers ──────────────────────────────────────────────────────────────
@@ -366,6 +368,7 @@ export class ApiConsumersService {
     approve: boolean,
     actorRole: string,
     reason?: string,
+    actorUserId?: string,
   ) {
     if (actorRole !== UserRole.SUPER_ADMIN) {
       throw new ForbiddenException('Réservé aux administrateurs.');
@@ -379,6 +382,17 @@ export class ApiConsumersService {
         accessStatus: approve ? 'APPROVED' : 'REJECTED',
         prodReviewedAt: new Date(),
         prodRejectionReason: approve ? null : (reason ?? 'Non précisé'),
+      },
+    });
+
+    this.audit.log({
+      userId: actorUserId,
+      action: approve ? 'API_CONSUMER_PROD_APPROVED' : 'API_CONSUMER_PROD_REJECTED',
+      resourceType: 'ApiConsumer',
+      resourceId: consumerId,
+      changes: {
+        before: { accessStatus: consumer.accessStatus },
+        after: { accessStatus: approve ? 'APPROVED' : 'REJECTED', reason: approve ? undefined : (reason ?? 'Non précisé') },
       },
     });
 

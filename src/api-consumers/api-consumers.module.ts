@@ -5,10 +5,11 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { BillingModule } from '../billing/billing.module';
 import { EmailModule } from '../email/email.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
+import { AuditService } from '../common/audit/audit.service';
 
 @Module({
   imports: [PrismaModule, BillingModule, EmailModule, WebhooksModule],
-  providers: [ApiConsumersService],
+  providers: [ApiConsumersService, AuditService],
   controllers: [ApiConsumersController],
   exports: [ApiConsumersService],
 })

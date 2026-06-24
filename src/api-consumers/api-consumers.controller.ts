@@ -84,8 +84,9 @@ export class ApiConsumersController {
     @Param('id') id: string,
     @Body() dto: { approve: boolean; reason?: string },
     @CurrentUser('role') role: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.reviewProduction(id, dto.approve, role, dto.reason);
+    return this.service.reviewProduction(id, dto.approve, role, dto.reason, userId);
   }
 
   @Post(':id/billing/subscribe')

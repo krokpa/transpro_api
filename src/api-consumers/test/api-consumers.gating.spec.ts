@@ -6,7 +6,7 @@ function makeService(consumer: any) {
     apiConsumer: { findUnique: jest.fn().mockResolvedValue(consumer) },
     apiKey: { create: jest.fn().mockResolvedValue({}) },
   };
-  const svc = new ApiConsumersService(prisma, {} as any, {} as any, {} as any, {} as any);
+  const svc = new ApiConsumersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any);
   return { svc, prisma };
 }
 
