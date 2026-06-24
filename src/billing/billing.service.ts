@@ -432,9 +432,13 @@ export class BillingService {
 
   /** Rétrograde les plans API payants expirés vers Starter. */
   private async processApiPlans(now: dayjs.Dayjs) {
+    const appUrl = this.config.get('FRONTEND_URL') || this.config.get('APP_URL') || 'http://localhost:3000';
+    const dashUrl = `${appUrl}/dashboard/developers`;
+
+    // Plans expirés → rétrogradation Starter + email.
     const expired = await this.prisma.apiConsumer.findMany({
       where: { planExpiresAt: { lt: now.toDate() }, NOT: { plan: 'STARTER' } },
-      select: { id: true },
+      select: { id: true, email: true, name: true },
     });
     for (const c of expired) {
       await this.prisma.apiConsumer.update({
@@ -442,6 +446,28 @@ export class BillingService {
         data: { plan: 'STARTER', planExpiresAt: null },
       });
       this.logger.warn(`API consumer ${c.id} plan expired → downgraded to STARTER`);
+      if (c.email) {
+        await this.email.sendApiPlanExpired(c.email, c.name, dashUrl).catch(() => {});
+      }
+    }
+
+    // Rappels J-7 / J-3 / J-1.
+    for (const daysAhead of [7, 3, 1]) {
+      const target = now.add(daysAhead, 'day');
+      const soon = await this.prisma.apiConsumer.findMany({
+        where: {
+          NOT: { plan: 'STARTER' },
+          planExpiresAt: { gte: target.startOf('day').toDate(), lte: target.endOf('day').toDate() },
+        },
+        select: { email: true, name: true, plan: true },
+      });
+      for (const c of soon) {
+        if (c.email) {
+          await this.email
+            .sendApiPlanExpiringSoon(c.email, c.name, c.plan, daysAhead, dashUrl)
+            .catch(() => {});
+        }
+      }
     }
   }
 

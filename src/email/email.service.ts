@@ -153,6 +153,30 @@ export class EmailService {
     });
   }
 
+  async sendApiPlanExpiringSoon(to: string, name: string, plan: string, daysAhead: number, dashboardUrl: string) {
+    await this.send({
+      to,
+      subject: `Votre plan API ${plan} expire dans ${daysAhead} jour(s) — TransPro CI`,
+      html: this.base(`
+        <p>Bonjour <strong>${name}</strong>,</p>
+        <p>Votre <strong>plan API ${plan}</strong> arrive à échéance dans <strong>${daysAhead} jour(s)</strong>. Renouvelez-le pour éviter une rétrogradation vers le plan Starter (quota réduit).</p>
+        <p style="text-align:center"><a href="${dashboardUrl}" class="btn">Renouveler mon plan</a></p>
+      `),
+    });
+  }
+
+  async sendApiPlanExpired(to: string, name: string, dashboardUrl: string) {
+    await this.send({
+      to,
+      subject: 'Votre plan API a expiré — rétrogradation en Starter — TransPro CI',
+      html: this.base(`
+        <p>Bonjour <strong>${name}</strong>,</p>
+        <p>Votre plan API payant a expiré : votre intégration est repassée au plan <strong>Starter</strong> (5 000 requêtes/mois). Vos clés restent valides.</p>
+        <p style="text-align:center"><a href="${dashboardUrl}" class="btn">Choisir un plan</a></p>
+      `),
+    });
+  }
+
   async sendApiProductionApproved(to: string, name: string, dashboardUrl: string) {
     await this.send({
       to,
