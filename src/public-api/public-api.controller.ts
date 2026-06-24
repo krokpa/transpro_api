@@ -6,6 +6,7 @@ import { ApiTags, ApiOperation, ApiHeader, ApiSecurity, ApiQuery } from '@nestjs
 import { PublicApiService } from './public-api.service';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
 import { ApiUsageInterceptor } from '../common/interceptors/api-usage.interceptor';
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 import { RequireScope } from '../common/decorators/require-scope.decorator';
 import { SCOPE } from '@transpro/shared';
 
@@ -14,7 +15,7 @@ import { SCOPE } from '@transpro/shared';
 @ApiHeader({ name: 'X-API-Key', description: 'Votre clé API TransPro', required: true })
 @Controller({ path: 'ext', version: '1' })
 @UseGuards(ApiKeyGuard)
-@UseInterceptors(ApiUsageInterceptor)
+@UseInterceptors(IdempotencyInterceptor, ApiUsageInterceptor)
 export class PublicApiController {
   constructor(private service: PublicApiService) {}
 

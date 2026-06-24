@@ -92,6 +92,8 @@ données.
 
 ### Réservations
 - `POST /ext/bookings` — Créer une réservation — Scope : `bookings:write`
+  - Envoyez un header **`Idempotency-Key`** (UUID) pour pouvoir rejouer la
+    requête sans créer de doublon : un rejeu renvoie la réponse d'origine.
   ```json
   {
     "tripId": "…",
