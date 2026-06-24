@@ -49,7 +49,12 @@ export class ApiConsumersService {
 
   // ── Consumers ──────────────────────────────────────────────────────────────
 
-  async createConsumer(dto: CreateApiConsumerDto, actorRole: string, actorTenantId?: string) {
+  async createConsumer(dto: CreateApiConsumerDto, actorRole: string, actorTenantId?: string, actorUserId?: string) {
+    // Les développeurs externes gèrent l'intégration créée à l'inscription.
+    if (actorRole === UserRole.DEVELOPER) {
+      throw new ForbiddenException('Votre intégration est déjà créée à l’inscription.');
+    }
+
     const existing = await this.prisma.apiConsumer.findUnique({ where: { email: dto.email } });
     if (existing) throw new ConflictException('Un consommateur avec cet email existe déjà');
 
@@ -76,9 +81,10 @@ export class ApiConsumersService {
     });
   }
 
-  async findAllConsumers(actorRole: string, actorTenantId?: string) {
-    const where = actorRole === UserRole.SUPER_ADMIN
-      ? {}
+  async findAllConsumers(actorRole: string, actorTenantId?: string, actorUserId?: string) {
+    const where =
+      actorRole === UserRole.SUPER_ADMIN ? {}
+      : actorRole === UserRole.DEVELOPER ? { ownerUserId: actorUserId }
       : { tenantId: actorTenantId };
 
     return this.prisma.apiConsumer.findMany({
@@ -90,7 +96,7 @@ export class ApiConsumersService {
     });
   }
 
-  async findOneConsumer(id: string, actorRole: string, actorTenantId?: string) {
+  async findOneConsumer(id: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({
       where: { id },
       include: {
@@ -105,15 +111,15 @@ export class ApiConsumersService {
     });
 
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     return consumer;
   }
 
-  async updateConsumer(id: string, dto: UpdateApiConsumerDto, actorRole: string, actorTenantId?: string) {
+  async updateConsumer(id: string, dto: UpdateApiConsumerDto, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     return this.prisma.apiConsumer.update({
       where: { id },
@@ -134,10 +140,10 @@ export class ApiConsumersService {
 
   // ── API Keys ───────────────────────────────────────────────────────────────
 
-  async createKey(consumerId: string, dto: CreateApiKeyDto, actorRole: string, actorTenantId?: string) {
+  async createKey(consumerId: string, dto: CreateApiKeyDto, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     // Valider que les scopes demandés sont couverts par le plan
     const allowedByPlan = API_PLAN_SCOPES[consumer.plan];
@@ -186,10 +192,10 @@ export class ApiConsumersService {
   }
 
   /** Rotation : génère une nouvelle clé (mêmes scopes/env) ; l'ancienne expire après 24 h. */
-  async rotateKey(consumerId: string, keyId: string, actorRole: string, actorTenantId?: string) {
+  async rotateKey(consumerId: string, keyId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     const old = await this.prisma.apiKey.findFirst({ where: { id: keyId, consumerId } });
     if (!old) throw new NotFoundException('Clé introuvable');
@@ -221,20 +227,20 @@ export class ApiConsumersService {
   }
 
   /** Régénère le secret de signature webhook. */
-  async regenerateWebhookSecret(consumerId: string, actorRole: string, actorTenantId?: string) {
+  async regenerateWebhookSecret(consumerId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     const webhookSecret = generateWebhookSecret();
     await this.prisma.apiConsumer.update({ where: { id: consumerId }, data: { webhookSecret } });
     return { webhookSecret };
   }
 
-  async revokeKey(consumerId: string, keyId: string, actorRole: string, actorTenantId?: string) {
+  async revokeKey(consumerId: string, keyId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     const key = await this.prisma.apiKey.findFirst({ where: { id: keyId, consumerId } });
     if (!key) throw new NotFoundException('Clé introuvable');
@@ -247,10 +253,10 @@ export class ApiConsumersService {
 
   // ── Usage & Stats ──────────────────────────────────────────────────────────
 
-  async getUsageStats(consumerId: string, actorRole: string, actorTenantId?: string) {
+  async getUsageStats(consumerId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     const now        = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -305,10 +311,10 @@ export class ApiConsumersService {
   // ── Facturation des plans (Genius Pay) ───────────────────────────────────────
 
   /** Souscrit/upgrade le plan d'un consumer. Starter = gratuit ; sinon Genius Pay. */
-  async subscribePlan(consumerId: string, plan: string, actorRole: string, actorTenantId?: string) {
+  async subscribePlan(consumerId: string, plan: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     if (!(plan in API_PLAN_PRICING)) {
       throw new ConflictException('Plan inconnu.');
@@ -330,20 +336,20 @@ export class ApiConsumersService {
   }
 
   /** Confirme un paiement de plan depuis la redirection post-paiement. */
-  async confirmPlanFromRedirect(consumerId: string, paymentId: string, actorRole: string, actorTenantId?: string) {
+  async confirmPlanFromRedirect(consumerId: string, paymentId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
     return this.billing.confirmApiPlanFromRedirect(paymentId, consumerId);
   }
 
   // ── Activation production (modèle hybride) ───────────────────────────────────
 
   /** L'owner demande l'activation de l'accès production (clés LIVE). */
-  async requestProduction(consumerId: string, actorRole: string, actorTenantId?: string) {
+  async requestProduction(consumerId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     if (consumer.accessStatus === 'APPROVED') {
       throw new ConflictException('Accès production déjà activé.');
@@ -410,10 +416,10 @@ export class ApiConsumersService {
 
   // ── Webhooks ─────────────────────────────────────────────────────────────────
 
-  async listWebhookDeliveries(consumerId: string, actorRole: string, actorTenantId?: string) {
+  async listWebhookDeliveries(consumerId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     return this.prisma.webhookDelivery.findMany({
       where: { consumerId },
@@ -428,10 +434,10 @@ export class ApiConsumersService {
   }
 
   /** Relance manuellement une livraison de webhook du consumer. */
-  async resendWebhook(consumerId: string, deliveryId: string, actorRole: string, actorTenantId?: string) {
+  async resendWebhook(consumerId: string, deliveryId: string, actorRole: string, actorTenantId?: string, actorUserId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
-    this.assertAccess(consumer, actorRole, actorTenantId);
+    this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
     const delivery = await this.prisma.webhookDelivery.findFirst({
       where: { id: deliveryId, consumerId },
@@ -445,9 +451,15 @@ export class ApiConsumersService {
 
   // ── Accès ──────────────────────────────────────────────────────────────────
 
-  private assertAccess(consumer: { tenantId: string | null }, actorRole: string, actorTenantId?: string) {
+  private assertAccess(
+    consumer: { tenantId: string | null; ownerUserId?: string | null },
+    actorRole: string,
+    actorTenantId?: string,
+    actorUserId?: string,
+  ) {
     if (actorRole === UserRole.SUPER_ADMIN) return;
     if (actorRole === UserRole.COMPANY_OWNER && consumer.tenantId === actorTenantId) return;
+    if (actorRole === UserRole.DEVELOPER && !!consumer.ownerUserId && consumer.ownerUserId === actorUserId) return;
     throw new ForbiddenException('Accès refusé');
   }
 }

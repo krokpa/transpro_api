@@ -18,7 +18,7 @@ import { UserRole } from '@transpro/shared';
 @ApiTags('API Publique — Gestion')
 @Controller({ path: 'api-consumers', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN, UserRole.COMPANY_OWNER)
+@Roles(UserRole.SUPER_ADMIN, UserRole.COMPANY_OWNER, UserRole.DEVELOPER)
 @ApiBearerAuth()
 export class ApiConsumersController {
   constructor(private service: ApiConsumersService) {}
@@ -31,8 +31,9 @@ export class ApiConsumersController {
     @Body() dto: CreateApiConsumerDto,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.createConsumer(dto, role, tenantId);
+    return this.service.createConsumer(dto, role, tenantId, userId);
   }
 
   @Get()
@@ -40,8 +41,9 @@ export class ApiConsumersController {
   findAll(
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.findAllConsumers(role, tenantId);
+    return this.service.findAllConsumers(role, tenantId, userId);
   }
 
   @Get(':id')
@@ -50,8 +52,9 @@ export class ApiConsumersController {
     @Param('id') id: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.findOneConsumer(id, role, tenantId);
+    return this.service.findOneConsumer(id, role, tenantId, userId);
   }
 
   @Patch(':id')
@@ -61,8 +64,9 @@ export class ApiConsumersController {
     @Body() dto: UpdateApiConsumerDto,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.updateConsumer(id, dto, role, tenantId);
+    return this.service.updateConsumer(id, dto, role, tenantId, userId);
   }
 
   @Post(':id/request-production')
@@ -72,8 +76,9 @@ export class ApiConsumersController {
     @Param('id') id: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.requestProduction(id, role, tenantId);
+    return this.service.requestProduction(id, role, tenantId, userId);
   }
 
   @Post(':id/review-production')
@@ -97,8 +102,9 @@ export class ApiConsumersController {
     @Body() dto: { plan: string },
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.subscribePlan(id, dto.plan, role, tenantId);
+    return this.service.subscribePlan(id, dto.plan, role, tenantId, userId);
   }
 
   @Post(':id/billing/confirm/:paymentId')
@@ -109,8 +115,9 @@ export class ApiConsumersController {
     @Param('paymentId') paymentId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.confirmPlanFromRedirect(id, paymentId, role, tenantId);
+    return this.service.confirmPlanFromRedirect(id, paymentId, role, tenantId, userId);
   }
 
   @Get(':id/usage')
@@ -119,8 +126,9 @@ export class ApiConsumersController {
     @Param('id') id: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.getUsageStats(id, role, tenantId);
+    return this.service.getUsageStats(id, role, tenantId, userId);
   }
 
   @Post(':id/webhooks/:deliveryId/resend')
@@ -131,8 +139,9 @@ export class ApiConsumersController {
     @Param('deliveryId') deliveryId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.resendWebhook(id, deliveryId, role, tenantId);
+    return this.service.resendWebhook(id, deliveryId, role, tenantId, userId);
   }
 
   @Get(':id/webhooks')
@@ -141,8 +150,9 @@ export class ApiConsumersController {
     @Param('id') id: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.listWebhookDeliveries(id, role, tenantId);
+    return this.service.listWebhookDeliveries(id, role, tenantId, userId);
   }
 
   // ── Clés API ───────────────────────────────────────────────────────────────
@@ -154,8 +164,9 @@ export class ApiConsumersController {
     @Body() dto: CreateApiKeyDto,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.createKey(consumerId, dto, role, tenantId);
+    return this.service.createKey(consumerId, dto, role, tenantId, userId);
   }
 
   @Post(':id/keys/:keyId/rotate')
@@ -166,8 +177,9 @@ export class ApiConsumersController {
     @Param('keyId') keyId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.rotateKey(consumerId, keyId, role, tenantId);
+    return this.service.rotateKey(consumerId, keyId, role, tenantId, userId);
   }
 
   @Delete(':id/keys/:keyId')
@@ -178,8 +190,9 @@ export class ApiConsumersController {
     @Param('keyId') keyId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.revokeKey(consumerId, keyId, role, tenantId);
+    return this.service.revokeKey(consumerId, keyId, role, tenantId, userId);
   }
 
   @Post(':id/regenerate-webhook-secret')
@@ -189,7 +202,8 @@ export class ApiConsumersController {
     @Param('id') consumerId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.service.regenerateWebhookSecret(consumerId, role, tenantId);
+    return this.service.regenerateWebhookSecret(consumerId, role, tenantId, userId);
   }
 }
