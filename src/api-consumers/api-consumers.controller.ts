@@ -65,6 +65,29 @@ export class ApiConsumersController {
     return this.service.updateConsumer(id, dto, role, tenantId);
   }
 
+  @Post(':id/request-production')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Demander l\'activation de l\'accès production (clés LIVE)' })
+  requestProduction(
+    @Param('id') id: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.service.requestProduction(id, role, tenantId);
+  }
+
+  @Post(':id/review-production')
+  @Roles(UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Approuver/rejeter une demande d\'activation production (admin)' })
+  reviewProduction(
+    @Param('id') id: string,
+    @Body() dto: { approve: boolean; reason?: string },
+    @CurrentUser('role') role: string,
+  ) {
+    return this.service.reviewProduction(id, dto.approve, role, dto.reason);
+  }
+
   @Get(':id/usage')
   @ApiOperation({ summary: 'Statistiques d\'usage mensuel d\'un consommateur' })
   usage(

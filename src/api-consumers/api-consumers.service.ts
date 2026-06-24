@@ -140,6 +140,14 @@ export class ApiConsumersService {
     }
 
     const environment = dto.environment === 'TEST' ? 'TEST' : 'LIVE';
+
+    // Modèle hybride : les clés LIVE exigent une validation production.
+    if (environment === 'LIVE' && consumer.accessStatus !== 'APPROVED') {
+      throw new ForbiddenException(
+        'Accès production non activé. Demandez l’activation puis attendez la validation avant de créer une clé LIVE.',
+      );
+    }
+
     const rawKey   = generateRawKey(environment);
     const keyPrefix = rawKey.substring(0, KEY_PREFIX_LENGTH);
     const keyHash   = createHash('sha256').update(rawKey).digest('hex');
@@ -227,6 +235,54 @@ export class ApiConsumersService {
       byStatus:     byStatus.map((s) => ({ statusCode: s.statusCode, count: s._count._all })),
       byDay,
     };
+  }
+
+  // ── Activation production (modèle hybride) ───────────────────────────────────
+
+  /** L'owner demande l'activation de l'accès production (clés LIVE). */
+  async requestProduction(consumerId: string, actorRole: string, actorTenantId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId);
+
+    if (consumer.accessStatus === 'APPROVED') {
+      throw new ConflictException('Accès production déjà activé.');
+    }
+    if (consumer.accessStatus === 'PENDING') {
+      throw new ConflictException('Demande déjà en attente de validation.');
+    }
+
+    return this.prisma.apiConsumer.update({
+      where: { id: consumerId },
+      data: {
+        accessStatus: 'PENDING',
+        prodRequestedAt: new Date(),
+        prodRejectionReason: null,
+      },
+    });
+  }
+
+  /** Un SUPER_ADMIN approuve ou rejette une demande d'activation production. */
+  async reviewProduction(
+    consumerId: string,
+    approve: boolean,
+    actorRole: string,
+    reason?: string,
+  ) {
+    if (actorRole !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Réservé aux administrateurs.');
+    }
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+
+    return this.prisma.apiConsumer.update({
+      where: { id: consumerId },
+      data: {
+        accessStatus: approve ? 'APPROVED' : 'REJECTED',
+        prodReviewedAt: new Date(),
+        prodRejectionReason: approve ? null : (reason ?? 'Non précisé'),
+      },
+    });
   }
 
   // ── Webhooks ─────────────────────────────────────────────────────────────────
