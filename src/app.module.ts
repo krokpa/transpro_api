@@ -42,6 +42,7 @@ import { CashProvisionsModule } from './cash-provisions/cash-provisions.module';
 import { StationCashPeriodsModule } from './station-cash-periods/station-cash-periods.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { RedisModule } from './common/redis/redis.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { PaymentRedirectController } from './payment-redirect.controller';
 
@@ -103,6 +104,7 @@ import { PaymentRedirectController } from './payment-redirect.controller';
     StationCashPeriodsModule,
     PromotionsModule,
     WebhooksModule,
+    RedisModule,
   ],
 })
 export class AppModule implements NestModule {

@@ -11,6 +11,7 @@ import { Reflector } from '@nestjs/core';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SCOPES_KEY } from '../decorators/require-scope.decorator';
+import { RateLimitService } from '../redis/rate-limit.service';
 import { API_PLAN_LIMITS, API_PLAN_SCOPES, ApiScope } from '@transpro/shared';
 
 @Injectable()
@@ -18,6 +19,7 @@ export class ApiKeyGuard implements CanActivate {
   constructor(
     private prisma: PrismaService,
     private reflector: Reflector,
+    private rateLimit: RateLimitService,
   ) {}
 
   /** Définit un header de réponse (compatible adaptateur Fastify ou Express). */
@@ -72,6 +74,16 @@ export class ApiKeyGuard implements CanActivate {
 
     const isTest = apiKey.environment === 'TEST';
 
+    // Limite de rafale (burst) par clé — appliquée à toutes les clés (test inclus).
+    const burst = await this.rateLimit.consumeBurst(apiKey.id);
+    if (!burst.allowed) {
+      this.setHeader(response, 'Retry-After', burst.retryAfter);
+      throw new HttpException(
+        'Trop de requêtes — ralentissez (limite de rafale atteinte).',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     // Vérification quota mensuel + headers X-RateLimit-*
     // Les clés sandbox (TEST) ne sont pas décomptées du quota.
     const limit = API_PLAN_LIMITS[consumer.plan];
@@ -80,16 +92,22 @@ export class ApiKeyGuard implements CanActivate {
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
     const resetEpoch = Math.floor(monthEnd.getTime() / 1000);
 
-    if (isTest) {
-      this.setHeader(response, 'X-RateLimit-Limit', 'unlimited');
-      this.setHeader(response, 'X-RateLimit-Remaining', 'unlimited');
-      this.setHeader(response, 'X-RateLimit-Reset', resetEpoch);
-    } else if (limit === Infinity) {
+    if (isTest || limit === Infinity) {
       this.setHeader(response, 'X-RateLimit-Limit', 'unlimited');
       this.setHeader(response, 'X-RateLimit-Remaining', 'unlimited');
       this.setHeader(response, 'X-RateLimit-Reset', resetEpoch);
     } else {
-      const usageThisMonth = await this.prisma.apiUsageLog.count({
+      const monthKey = `${now.getFullYear()}-${now.getMonth() + 1}`;
+      // Compteur Redis (rapide) avec repli sur COUNT DB si Redis indisponible.
+      const redisCount = await this.rateLimit.consumeMonthly(
+        consumer.id,
+        monthKey,
+        resetEpoch,
+        () => this.prisma.apiUsageLog.count({
+          where: { consumerId: consumer.id, createdAt: { gte: monthStart } },
+        }),
+      );
+      const usageThisMonth = redisCount ?? await this.prisma.apiUsageLog.count({
         where: { consumerId: consumer.id, createdAt: { gte: monthStart } },
       });
       const remaining = Math.max(0, limit - usageThisMonth);
@@ -98,7 +116,7 @@ export class ApiKeyGuard implements CanActivate {
       this.setHeader(response, 'X-RateLimit-Remaining', remaining);
       this.setHeader(response, 'X-RateLimit-Reset', resetEpoch);
 
-      if (usageThisMonth >= limit) {
+      if (usageThisMonth > limit) {
         const retryAfter = Math.max(1, resetEpoch - Math.floor(now.getTime() / 1000));
         this.setHeader(response, 'Retry-After', retryAfter);
         throw new HttpException(

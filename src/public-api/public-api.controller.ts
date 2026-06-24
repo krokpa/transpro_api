@@ -8,6 +8,7 @@ import { ApiKeyGuard } from '../common/guards/api-key.guard';
 import { ApiUsageInterceptor } from '../common/interceptors/api-usage.interceptor';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 import { RequireScope } from '../common/decorators/require-scope.decorator';
+import { CreateExtBookingDto } from './dto/ext-booking.dto';
 import { SCOPE } from '@transpro/shared';
 
 @ApiTags('API Publique (tiers)')
@@ -97,13 +98,7 @@ export class PublicApiController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Créer une réservation pour un passager' })
   createBooking(
-    @Body() body: {
-      tripId:          string;
-      passengerPhone:  string;
-      passengerEmail?: string;
-      passengerName:   string;
-      seatNumbers:     string[];
-    },
+    @Body() body: CreateExtBookingDto,
     @Req() req: any,
   ) {
     return this.service.createBooking({
