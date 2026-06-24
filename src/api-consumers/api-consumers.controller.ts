@@ -145,6 +145,18 @@ export class ApiConsumersController {
     return this.service.createKey(consumerId, dto, role, tenantId);
   }
 
+  @Post(':id/keys/:keyId/rotate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Faire tourner une clé (ancienne valable 24 h)' })
+  rotateKey(
+    @Param('id') consumerId: string,
+    @Param('keyId') keyId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.service.rotateKey(consumerId, keyId, role, tenantId);
+  }
+
   @Delete(':id/keys/:keyId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Révoquer une clé API' })
@@ -155,5 +167,16 @@ export class ApiConsumersController {
     @CurrentUser('tenantId') tenantId: string,
   ) {
     return this.service.revokeKey(consumerId, keyId, role, tenantId);
+  }
+
+  @Post(':id/regenerate-webhook-secret')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Régénérer le secret de signature webhook' })
+  regenerateWebhookSecret(
+    @Param('id') consumerId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.service.regenerateWebhookSecret(consumerId, role, tenantId);
   }
 }

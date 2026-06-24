@@ -181,6 +181,52 @@ export class ApiConsumersService {
     };
   }
 
+  /** Rotation : génère une nouvelle clé (mêmes scopes/env) ; l'ancienne expire après 24 h. */
+  async rotateKey(consumerId: string, keyId: string, actorRole: string, actorTenantId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId);
+
+    const old = await this.prisma.apiKey.findFirst({ where: { id: keyId, consumerId } });
+    if (!old) throw new NotFoundException('Clé introuvable');
+
+    const environment = old.environment;
+    if (environment === 'LIVE' && consumer.accessStatus !== 'APPROVED') {
+      throw new ForbiddenException('Accès production non activé.');
+    }
+
+    const rawKey   = generateRawKey(environment);
+    const keyPrefix = rawKey.substring(0, KEY_PREFIX_LENGTH);
+    const keyHash   = createHash('sha256').update(rawKey).digest('hex');
+    const GRACE_HOURS = 24;
+    const oldExpiresAt = new Date(Date.now() + GRACE_HOURS * 3600 * 1000);
+
+    await this.prisma.$transaction([
+      this.prisma.apiKey.create({
+        data: { consumerId, name: old.name, keyPrefix, keyHash, environment, scopes: old.scopes },
+      }),
+      this.prisma.apiKey.update({ where: { id: old.id }, data: { expiresAt: oldExpiresAt } }),
+    ]);
+
+    return {
+      key: rawKey,
+      environment,
+      oldKeyExpiresAt: oldExpiresAt,
+      message: `Nouvelle clé générée. L'ancienne reste valable ${GRACE_HOURS} h pour migrer.`,
+    };
+  }
+
+  /** Régénère le secret de signature webhook. */
+  async regenerateWebhookSecret(consumerId: string, actorRole: string, actorTenantId?: string) {
+    const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
+    if (!consumer) throw new NotFoundException('Consommateur introuvable');
+    this.assertAccess(consumer, actorRole, actorTenantId);
+
+    const webhookSecret = generateWebhookSecret();
+    await this.prisma.apiConsumer.update({ where: { id: consumerId }, data: { webhookSecret } });
+    return { webhookSecret };
+  }
+
   async revokeKey(consumerId: string, keyId: string, actorRole: string, actorTenantId?: string) {
     const consumer = await this.prisma.apiConsumer.findUnique({ where: { id: consumerId } });
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
