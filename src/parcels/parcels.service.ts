@@ -7,6 +7,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookEvent } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { NotificationType } from '@transpro/shared';
 import { calculateParcelFee, generateReference, PARCEL_MAX_WEIGHT_KG } from '@transpro/shared';
@@ -95,6 +97,7 @@ export class ParcelsService {
     private email: EmailService,
     private sms: SmsService,
     private config: ConfigService,
+    private webhooks: WebhooksService,
   ) {}
 
   // ── Create (guichet agent) ────────────────────────────────────────────────
@@ -358,6 +361,13 @@ export class ParcelsService {
 
     // Notify sender
     this._notifyStatusChange(parcel, dto.status).catch(() => {});
+
+    // Webhook API tierce : diffuser aux consumers de la compagnie.
+    this.webhooks.emitToTenantConsumers(tenantId, WebhookEvent.PARCEL_STATUS_CHANGED, {
+      trackingCode: parcel.trackingCode,
+      status: dto.status,
+      deliveryCity: parcel.deliveryCity,
+    }).catch(() => {});
 
     return updated;
   }

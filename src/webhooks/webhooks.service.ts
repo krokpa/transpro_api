@@ -155,6 +155,25 @@ export class WebhooksService {
     }
   }
 
+  /**
+   * Émet un événement vers tous les consumers actifs (avec webhookUrl) rattachés
+   * à une compagnie. Utilisé pour les événements non liés à une réservation API
+   * (ex. statut de colis).
+   */
+  async emitToTenantConsumers(
+    tenantId: string,
+    event: WebhookEvent,
+    payload: Record<string, any>,
+  ): Promise<void> {
+    const consumers = await this.prisma.apiConsumer.findMany({
+      where: { tenantId, status: 'ACTIVE', webhookUrl: { not: null } },
+      select: { id: true },
+    });
+    for (const c of consumers) {
+      await this.emitToConsumer(c.id, event, payload).catch(() => {});
+    }
+  }
+
   /** Relance manuellement une livraison (réinitialise puis ré-essaie immédiatement). */
   async resend(deliveryId: string): Promise<void> {
     await this.prisma.webhookDelivery.update({

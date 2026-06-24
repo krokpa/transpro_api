@@ -127,6 +127,7 @@ de signature `whsec_…` est généré ; il sert à vérifier l'authenticité de
 | `BOOKING_CANCELLED` | Réservation annulée (expiration de paiement ou voyage annulé) |
 | `TRIP_DELAYED` | Voyage retardé |
 | `TRIP_CANCELLED` | Voyage annulé par la compagnie |
+| `PARCEL_STATUS_CHANGED` | Statut d'un colis modifié (diffusé aux intégrations de la compagnie) |
 
 ### Format de l'appel (POST vers votre URL)
 Headers :
