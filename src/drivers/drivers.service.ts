@@ -75,7 +75,7 @@ export class DriversService {
     // SMS d'invitation — non bloquant, message clair sans OTP qui expire
     this.sms.send(
       dto.phone,
-      `Bienvenue sur TransPro CI ! Votre compte chauffeur a été créé.\n` +
+      `Bienvenue sur {APP} ! Votre compte chauffeur a été créé.\n` +
       `Connectez-vous avec votre numéro de téléphone sur l'application ou sur le web.\n` +
       `Un code vous sera envoyé à chaque connexion.`,
     ).catch(() => {});

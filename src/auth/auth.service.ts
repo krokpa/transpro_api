@@ -13,6 +13,7 @@ import { generateSecret, generateSync, verifySync, generateURI } from 'otplib';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { OtpService } from '../otp/otp.service';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 import { RegisterDto, LoginDto, LoginByPhoneDto } from './dto/register.dto';
 import { JwtPayload, AuthTokens, PERM, SYSTEM_PROFILES, UserRole } from '@transpro/shared';
 import { nanoid } from 'nanoid';
@@ -25,6 +26,7 @@ export class AuthService {
     private config: ConfigService,
     private email: EmailService,
     private otpService: OtpService,
+    private settings: PlatformSettingsService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -219,7 +221,8 @@ export class AuthService {
     if (user.totpEnabled) throw new BadRequestException('Le 2FA est déjà activé');
 
     const secret = generateSecret();
-    const otpAuthUri = generateURI({ label: user.email, issuer: 'TransPro CI', secret });
+    const { appName } = await this.settings.getBrand();
+    const otpAuthUri = generateURI({ label: user.email, issuer: appName, secret });
 
     // Stocker le secret temporairement (pas encore activé)
     await this.prisma.user.update({ where: { id: userId }, data: { totpSecret: secret } });
@@ -503,7 +506,7 @@ export class AuthService {
       const data: any = await res.json();
       if (data.error)  throw new UnauthorizedException('Token Facebook invalide');
       socialId  = data.id;
-      email     = data.email ?? `fb_${data.id}@noemail.transpro.ci`;
+      email     = data.email ?? `fb_${data.id}@noemail.${this.config.get('APP_DOMAIN', 'transpro.ci')}`;
       firstName = data.first_name ?? '';
       lastName  = data.last_name  ?? '';
       avatar    = data.picture?.data?.url;

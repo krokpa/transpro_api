@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 @Injectable()
 export class SmsService {
@@ -10,7 +11,10 @@ export class SmsService {
   private readonly sender: string;
   private readonly enabled: boolean;
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private settings: PlatformSettingsService,
+  ) {
     this.apiKey   = this.config.get('AFRICASTALKING_API_KEY', '');
     this.username = this.config.get('AFRICASTALKING_USERNAME', 'sandbox');
     this.sender   = this.config.get('AFRICASTALKING_SENDER', '');
@@ -26,6 +30,10 @@ export class SmsService {
    * Les numéros doivent être au format international (+225XXXXXXXXXX).
    */
   async send(to: string | string[], message: string): Promise<void> {
+    // Substitution du token de marque (white-label).
+    const brand = await this.settings.getBrand();
+    message = message.replaceAll('{APP}', brand.appName);
+
     if (!this.enabled) {
       this.logger.debug(`[SMS simulé → ${Array.isArray(to) ? to.join(',') : to}]: ${message}`);
       return;
@@ -59,22 +67,22 @@ export class SmsService {
   // ── Message templates ──────────────────────────────────────────────────────
 
   parcelCollected(trackingCode: string, deliveryCity: string): string {
-    return `TransPro CI - Votre colis ${trackingCode} a été pris en charge et est en route vers ${deliveryCity}. Suivez-le sur l'app.`;
+    return `{APP} - Votre colis ${trackingCode} a été pris en charge et est en route vers ${deliveryCity}. Suivez-le sur l'app.`;
   }
 
   parcelInTransit(trackingCode: string, deliveryCity: string): string {
-    return `TransPro CI - Votre colis ${trackingCode} est en transit vers ${deliveryCity}.`;
+    return `{APP} - Votre colis ${trackingCode} est en transit vers ${deliveryCity}.`;
   }
 
   parcelArrived(trackingCode: string, deliveryCity: string): string {
-    return `TransPro CI - Votre colis ${trackingCode} est arrivé à ${deliveryCity}. Vous pouvez le récupérer à la gare.`;
+    return `{APP} - Votre colis ${trackingCode} est arrivé à ${deliveryCity}. Vous pouvez le récupérer à la gare.`;
   }
 
   parcelDelivered(trackingCode: string, deliveryCity: string): string {
-    return `TransPro CI - Votre colis ${trackingCode} a été remis au destinataire à ${deliveryCity}. Merci d'avoir utilisé TransPro CI.`;
+    return `{APP} - Votre colis ${trackingCode} a été remis au destinataire à ${deliveryCity}. Merci d'avoir utilisé {APP}.`;
   }
 
   parcelCreated(trackingCode: string, deliveryCity: string): string {
-    return `TransPro CI - Votre colis ${trackingCode} a été enregistré. Il sera acheminé vers ${deliveryCity}. Gardez ce code pour le suivi.`;
+    return `{APP} - Votre colis ${trackingCode} a été enregistré. Il sera acheminé vers ${deliveryCity}. Gardez ce code pour le suivi.`;
   }
 }

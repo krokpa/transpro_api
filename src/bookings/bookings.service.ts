@@ -192,7 +192,7 @@ export class BookingsService {
 
   /** Retourne (ou crée une seule fois) le compte passager générique partagé d'un tenant. */
   private async getOrCreateGuestPassenger(tenant: { id: string; slug: string }): Promise<any> {
-    const guestEmail = `guichet@${tenant.slug}.transpro.ci`;
+    const guestEmail = `guichet@${tenant.slug}.${this.config.get('APP_DOMAIN', 'transpro.ci')}`;
     const guestPhone = `+000${tenant.id.replace(/-/g, '').slice(0, 12)}`;
 
     return this.prisma.user.upsert({
@@ -462,7 +462,7 @@ export class BookingsService {
         // Téléphone fourni mais inconnu → compte lié à ce numéro
         const strongPwd    = crypto.randomBytes(32).toString('hex');
         const passwordHash = await bcrypt.hash(strongPwd, 12);
-        const email        = `${dto.phone.replace(/\D/g, '')}@guichet.transpro.ci`;
+        const email        = `${dto.phone.replace(/\D/g, '')}@guichet.${this.config.get('APP_DOMAIN', 'transpro.ci')}`;
         passenger = await this.prisma.user.upsert({
           where:  { email },
           update: {},

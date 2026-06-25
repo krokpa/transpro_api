@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentsService } from '../payments/payments.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
@@ -17,7 +18,12 @@ export class PublicApiService {
     private webhooks: WebhooksService,
     private bookings: BookingsService,
     private parcels: ParcelsService,
+    private config: ConfigService,
   ) {}
+
+  private get domain(): string {
+    return this.config.get<string>('APP_DOMAIN', 'transpro.ci');
+  }
 
   /**
    * Filtre tenant pour les endpoints publics.
@@ -192,7 +198,7 @@ export class PublicApiService {
         createdAt: new Date(),
         seatNumbers: dto.seatNumbers,
         payment: {
-          url: `https://sandbox.transpro.ci/pay/${ref}`,
+          url: `https://sandbox.${this.domain}/pay/${ref}`,
           reference: ref,
           expiresAt: new Date(Date.now() + 15 * 60 * 1000),
         },
@@ -208,7 +214,7 @@ export class PublicApiService {
       passenger = await this.prisma.user.create({
         data: {
           phone:     dto.passengerPhone,
-          email:     dto.passengerEmail ?? `ext_${dto.passengerPhone.replace(/\D/g, '')}@api.transpro.ci`,
+          email:     dto.passengerEmail ?? `ext_${dto.passengerPhone.replace(/\D/g, '')}@api.${this.domain}`,
           firstName: firstName ?? dto.passengerName,
           lastName:  lastParts.join(' ') || '-',
           role:      'PASSENGER',
@@ -598,7 +604,7 @@ export class PublicApiService {
       sender = await this.prisma.user.create({
         data: {
           phone:      dto.senderPhone,
-          email:      dto.senderEmail ?? `ext_${dto.senderPhone.replace(/\D/g, '')}@api.transpro.ci`,
+          email:      dto.senderEmail ?? `ext_${dto.senderPhone.replace(/\D/g, '')}@api.${this.domain}`,
           firstName:  firstName ?? dto.senderName,
           lastName:   lastParts.join(' ') || '-',
           role:       'PASSENGER',

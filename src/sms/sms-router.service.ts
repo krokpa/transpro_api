@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrangeSmsService } from './orange-sms.service';
 import { MtnSmsService } from './mtn-sms.service';
 import { SmsService } from './sms.service';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 /**
  * Router SMS — ordre de priorité :
@@ -22,15 +24,30 @@ export class SmsRouterService {
     private mtn: MtnSmsService,
     private africastalking: SmsService,
     private prisma: PrismaService,
+    private config: ConfigService,
+    private settings: PlatformSettingsService,
   ) {}
 
+  /** Sender ID système par défaut (configurable — white-label). */
+  private get systemSender(): string {
+    return this.config.get<string>('SMS_SENDER_ID', 'TRANSPRO-CI');
+  }
+
+  /** Substitue le token de marque {APP} dans un message. */
+  private async brandify(message: string): Promise<string> {
+    const brand = await this.settings.getBrand();
+    return message.replaceAll('{APP}', brand.appName);
+  }
+
   /**
-   * Envoie un SMS système (OTP, alertes TransPro).
+   * Envoie un SMS système (OTP, alertes).
    * Pas de décompte de crédits tenant.
    */
   async send(to: string | string[], message: string, sender?: string): Promise<void> {
-    const provider = await this.dispatch(to, message, sender);
-    await this.logSms(null, to, message, sender ?? 'TRANSPRO-CI', provider);
+    message = await this.brandify(message);
+    const from = sender ?? this.systemSender;
+    const provider = await this.dispatch(to, message, from);
+    await this.logSms(null, to, message, from, provider);
   }
 
   /**
@@ -51,8 +68,9 @@ export class SmsRouterService {
       orderBy: { createdAt: 'asc' },
     });
 
+    message = await this.brandify(message);
     const count = Array.isArray(to) ? to.length : 1;
-    const sender = credit?.customSender ?? 'TRANSPRO-CI';
+    const sender = credit?.customSender ?? this.systemSender;
 
     if (!credit || credit.remaining < count) {
       this.logger.warn(

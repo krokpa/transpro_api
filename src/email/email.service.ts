@@ -1,13 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private transporter: nodemailer.Transporter;
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private settings: PlatformSettingsService,
+  ) {
     this.transporter = nodemailer.createTransport({
       host: this.config.get('MAIL_HOST', 'localhost'),
       port: this.config.get<number>('MAIL_PORT', 1025),
@@ -21,7 +25,7 @@ export class EmailService {
   async sendPasswordReset(to: string, firstName: string, resetUrl: string) {
     await this.send({
       to,
-      subject: 'Réinitialisation de votre mot de passe — TransPro CI',
+      subject: 'Réinitialisation de votre mot de passe — {APP}',
       html: this.passwordResetTemplate(firstName, resetUrl),
     });
   }
@@ -37,7 +41,7 @@ export class EmailService {
   }) {
     await this.send({
       to,
-      subject: `Réservation confirmée ${details.reference} — TransPro CI`,
+      subject: `Réservation confirmée ${details.reference} — {APP}`,
       html: this.bookingConfirmationTemplate(firstName, details),
     });
   }
@@ -45,7 +49,7 @@ export class EmailService {
   async sendWelcome(to: string, firstName: string) {
     await this.send({
       to,
-      subject: 'Bienvenue sur TransPro CI',
+      subject: 'Bienvenue sur {APP}',
       html: this.welcomeTemplate(firstName),
     });
   }
@@ -59,7 +63,7 @@ export class EmailService {
   ) {
     await this.send({
       to,
-      subject: `Votre période d'essai expire dans ${daysLeft} jour${daysLeft > 1 ? 's' : ''} — TransPro CI`,
+      subject: `Votre période d'essai expire dans ${daysLeft} jour${daysLeft > 1 ? 's' : ''} — {APP}`,
       html: this.trialExpiringSoonTemplate(firstName, companyName, daysLeft, renewUrl),
     });
   }
@@ -72,7 +76,7 @@ export class EmailService {
   ) {
     await this.send({
       to,
-      subject: `Votre période d'essai est terminée — TransPro CI`,
+      subject: `Votre période d'essai est terminée — {APP}`,
       html: this.trialExpiredTemplate(firstName, companyName, renewUrl),
     });
   }
@@ -87,7 +91,7 @@ export class EmailService {
   ) {
     await this.send({
       to,
-      subject: `Votre abonnement expire dans ${daysLeft} jour${daysLeft > 1 ? 's' : ''} — TransPro CI`,
+      subject: `Votre abonnement expire dans ${daysLeft} jour${daysLeft > 1 ? 's' : ''} — {APP}`,
       html: this.subscriptionExpiringSoonTemplate(firstName, companyName, daysLeft, amount, renewUrl),
     });
   }
@@ -100,7 +104,7 @@ export class EmailService {
   ) {
     await this.send({
       to,
-      subject: 'Votre abonnement est suspendu — TransPro CI',
+      subject: 'Votre abonnement est suspendu — {APP}',
       html: this.subscriptionExpiredTemplate(firstName, companyName, renewUrl),
     });
   }
@@ -116,7 +120,7 @@ export class EmailService {
   ) {
     await this.send({
       to,
-      subject: `Paiement confirmé — Abonnement ${plan} TransPro CI`,
+      subject: `Paiement confirmé — Abonnement ${plan} {APP}`,
       html: this.subscriptionPaymentSuccessTemplate(firstName, companyName, plan, amount, endDate, dashboardUrl),
     });
   }
@@ -129,7 +133,7 @@ export class EmailService {
   ) {
     await this.send({
       to,
-      subject: 'Échec du paiement — Abonnement TransPro CI',
+      subject: 'Échec du paiement — Abonnement {APP}',
       html: this.subscriptionPaymentFailedTemplate(firstName, companyName, retryUrl),
     });
   }
@@ -139,7 +143,7 @@ export class EmailService {
   ) {
     await this.send({
       to,
-      subject: `Paiement confirmé — Plan API ${plan} TransPro CI`,
+      subject: `Paiement confirmé — Plan API ${plan} {APP}`,
       html: this.base(`
         <p>Bonjour <strong>${name}</strong>,</p>
         <p>Votre paiement pour le <strong>plan API ${plan}</strong> a bien été reçu. Votre accès est actif.</p>
@@ -156,7 +160,7 @@ export class EmailService {
   async sendEmailVerification(to: string, name: string, verifyUrl: string) {
     await this.send({
       to,
-      subject: 'Vérifiez votre email — Espace Développeur TransPro',
+      subject: 'Vérifiez votre email — Espace Développeur {APP}',
       html: this.base(`
         <p>Bonjour <strong>${name}</strong>,</p>
         <p>Bienvenue ! Confirmez votre adresse email pour finaliser votre compte développeur et débloquer la demande d'accès production.</p>
@@ -170,7 +174,7 @@ export class EmailService {
   async sendApiPlanExpiringSoon(to: string, name: string, plan: string, daysAhead: number, dashboardUrl: string) {
     await this.send({
       to,
-      subject: `Votre plan API ${plan} expire dans ${daysAhead} jour(s) — TransPro CI`,
+      subject: `Votre plan API ${plan} expire dans ${daysAhead} jour(s) — {APP}`,
       html: this.base(`
         <p>Bonjour <strong>${name}</strong>,</p>
         <p>Votre <strong>plan API ${plan}</strong> arrive à échéance dans <strong>${daysAhead} jour(s)</strong>. Renouvelez-le pour éviter une rétrogradation vers le plan Starter (quota réduit).</p>
@@ -182,7 +186,7 @@ export class EmailService {
   async sendApiPlanExpired(to: string, name: string, dashboardUrl: string) {
     await this.send({
       to,
-      subject: 'Votre plan API a expiré — rétrogradation en Starter — TransPro CI',
+      subject: 'Votre plan API a expiré — rétrogradation en Starter — {APP}',
       html: this.base(`
         <p>Bonjour <strong>${name}</strong>,</p>
         <p>Votre plan API payant a expiré : votre intégration est repassée au plan <strong>Starter</strong> (5 000 requêtes/mois). Vos clés restent valides.</p>
@@ -194,7 +198,7 @@ export class EmailService {
   async sendApiProductionApproved(to: string, name: string, dashboardUrl: string) {
     await this.send({
       to,
-      subject: 'Accès production API activé — TransPro CI',
+      subject: 'Accès production API activé — {APP}',
       html: this.base(`
         <p>Bonjour <strong>${name}</strong>,</p>
         <p>Bonne nouvelle : votre demande d'<strong>accès production</strong> a été approuvée. Vous pouvez désormais générer des clés <strong>LIVE</strong> (tpk_live_).</p>
@@ -206,7 +210,7 @@ export class EmailService {
   async sendApiProductionRejected(to: string, name: string, reason: string, dashboardUrl: string) {
     await this.send({
       to,
-      subject: 'Demande d\'accès production refusée — TransPro CI',
+      subject: 'Demande d\'accès production refusée — {APP}',
       html: this.base(`
         <p>Bonjour <strong>${name}</strong>,</p>
         <p>Votre demande d'accès production n'a pas été approuvée.</p>
@@ -228,7 +232,7 @@ export class EmailService {
   }) {
     await this.send({
       to,
-      subject: `Colis enregistré ${params.trackingCode} — TransPro CI`,
+      subject: `Colis enregistré ${params.trackingCode} — {APP}`,
       html: this.parcelCreatedTemplate(params),
     });
   }
@@ -244,7 +248,7 @@ export class EmailService {
   }) {
     await this.send({
       to,
-      subject: `Colis ${params.trackingCode} — ${params.statusLabel} — TransPro CI`,
+      subject: `Colis ${params.trackingCode} — ${params.statusLabel} — {APP}`,
       html: this.parcelStatusTemplate(params),
     });
   }
@@ -259,7 +263,7 @@ export class EmailService {
   }) {
     await this.send({
       to,
-      subject: `Reversement effectué — ${params.periodLabel} — TransPro CI`,
+      subject: `Reversement effectué — ${params.periodLabel} — {APP}`,
       html: this.settlementPaidTemplate(params),
     });
   }
@@ -274,16 +278,25 @@ export class EmailService {
   }) {
     await this.send({
       to,
-      subject: `Reversement échoué — ${params.periodLabel} — TransPro CI`,
+      subject: `Reversement échoué — ${params.periodLabel} — {APP}`,
       html: this.settlementFailedTemplate(params),
     });
   }
 
   private async send(mail: { to: string; subject: string; html: string }) {
     try {
+      const brand = await this.settings.getBrand();
+      // Substitution des tokens de marque (white-label) dans le sujet et le HTML.
+      const apply = (s: string) =>
+        s.replaceAll('{APP}', brand.appName)
+         .replaceAll('{TAGLINE}', brand.tagline)
+         .replaceAll('{BRAND_COLOR}', brand.primaryColor)
+         .replaceAll('{DOMAIN}', brand.domain);
       await this.transporter.sendMail({
-        from: `TransPro CI <${this.config.get('MAIL_FROM', 'noreply@transpro.ci')}>`,
-        ...mail,
+        from: `${brand.appName} <${brand.emailFrom}>`,
+        to: mail.to,
+        subject: apply(mail.subject),
+        html: apply(mail.html),
       });
     } catch (err) {
       this.logger.error(`Échec envoi email à ${mail.to}: ${err.message}`);
@@ -299,23 +312,23 @@ export class EmailService {
 <style>
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;margin:0;padding:0}
   .wrap{max-width:560px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,.08)}
-  .header{background:#f05a1a;padding:28px 32px;text-align:center}
+  .header{background:{BRAND_COLOR};padding:28px 32px;text-align:center}
   .header h1{color:#fff;margin:0;font-size:22px;font-weight:700;letter-spacing:.5px}
   .body{padding:32px}
   .body p{color:#374151;line-height:1.65;margin:0 0 16px}
-  .btn{display:inline-block;background:#f05a1a;color:#fff!important;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;margin:8px 0}
+  .btn{display:inline-block;background:{BRAND_COLOR};color:#fff!important;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;margin:8px 0}
   .footer{padding:20px 32px;border-top:1px solid #f1f5f9;text-align:center}
   .footer p{color:#9ca3af;font-size:12px;margin:0}
-  .info-box{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:16px;margin:16px 0}
-  .info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #ffedd5;font-size:14px}
+  .info-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin:16px 0}
+  .info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eef2f7;font-size:14px}
   .info-row:last-child{border-bottom:none}
-  .label{color:#9a3412;font-weight:600}
+  .label{color:#64748b;font-weight:600}
   .value{color:#1f2937;font-weight:500}
 </style></head>
 <body><div class="wrap">
-  <div class="header"><h1>🚌 TransPro CI</h1></div>
+  <div class="header"><h1>{APP}</h1></div>
   <div class="body">${content}</div>
-  <div class="footer"><p>TransPro CI — Voyagez en toute sérénité<br>Côte d'Ivoire</p></div>
+  <div class="footer"><p>{APP} — {TAGLINE}</p></div>
 </div></body></html>`;
   }
 
@@ -351,7 +364,7 @@ export class EmailService {
   private welcomeTemplate(firstName: string) {
     return this.base(`
       <p>Bonjour <strong>${firstName}</strong>,</p>
-      <p>Bienvenue sur <strong>TransPro CI</strong> — la plateforme de gestion et de réservation de transport en Côte d'Ivoire.</p>
+      <p>Bienvenue sur <strong>{APP}</strong> — la plateforme de gestion et de réservation de transport en Côte d'Ivoire.</p>
       <p>Vous pouvez dès maintenant rechercher des voyages, réserver vos sièges et suivre vos billets depuis votre espace passager.</p>
       <p style="text-align:center"><a href="${this.config.get('APP_URL', 'http://localhost:3000')}/login" class="btn">Accéder à mon espace</a></p>
     `);
@@ -366,14 +379,14 @@ export class EmailService {
     const urgencyColor = daysLeft <= 3 ? '#ef4444' : '#f59e0b';
     return this.base(`
       <p>Bonjour <strong>${firstName}</strong>,</p>
-      <p>La période d'essai gratuite de <strong>${companyName}</strong> sur TransPro CI expire dans
+      <p>La période d'essai gratuite de <strong>${companyName}</strong> sur {APP} expire dans
         <strong style="color:${urgencyColor}">${daysLeft} jour${daysLeft > 1 ? 's' : ''}</strong>.
       </p>
       <div class="info-box">
         <div class="info-row"><span class="label">Compagnie</span><span class="value">${companyName}</span></div>
         <div class="info-row"><span class="label">Jours restants</span><span class="value" style="color:${urgencyColor};font-weight:700">${daysLeft} jour${daysLeft > 1 ? 's' : ''}</span></div>
       </div>
-      <p>Pour continuer à utiliser TransPro CI sans interruption, souscrivez à un abonnement avant l'expiration.</p>
+      <p>Pour continuer à utiliser {APP} sans interruption, souscrivez à un abonnement avant l'expiration.</p>
       <p style="text-align:center"><a href="${renewUrl}" class="btn">Activer mon abonnement</a></p>
       <p style="font-size:13px;color:#6b7280">Sans renouvellement, votre espace sera suspendu automatiquement à la fin de l'essai.</p>
     `);
@@ -389,7 +402,7 @@ export class EmailService {
       <p>La période d'essai gratuite de <strong>${companyName}</strong> est terminée. Votre espace a été <strong style="color:#ef4444">suspendu</strong>.</p>
       <p>Vos données sont conservées. Pour réactiver votre compte et reprendre l'activité, souscrivez à un abonnement dès maintenant.</p>
       <p style="text-align:center"><a href="${renewUrl}" class="btn">Réactiver mon compte</a></p>
-      <p style="font-size:13px;color:#6b7280">Besoin d'aide ? Contactez notre support à <a href="mailto:support@transpro.ci">support@transpro.ci</a></p>
+      <p style="font-size:13px;color:#6b7280">Besoin d'aide ? Contactez notre support à <a href="mailto:support@{DOMAIN}">support@{DOMAIN}</a></p>
     `);
   }
 
@@ -428,7 +441,7 @@ export class EmailService {
       <p>L'abonnement de <strong>${companyName}</strong> a expiré. Votre espace a été <strong style="color:#ef4444">suspendu</strong>.</p>
       <p>Vos données et paramètres sont intacts. Renouvelez votre abonnement pour reprendre l'activité immédiatement.</p>
       <p style="text-align:center"><a href="${renewUrl}" class="btn">Renouveler et réactiver</a></p>
-      <p style="font-size:13px;color:#6b7280">Besoin d'aide ? Contactez notre support à <a href="mailto:support@transpro.ci">support@transpro.ci</a></p>
+      <p style="font-size:13px;color:#6b7280">Besoin d'aide ? Contactez notre support à <a href="mailto:support@{DOMAIN}">support@{DOMAIN}</a></p>
     `);
   }
 
@@ -446,7 +459,7 @@ export class EmailService {
     const fmtFee = new Intl.NumberFormat('fr-CI').format(p.fee);
     return this.base(`
       <p>Bonjour <strong>${p.senderName}</strong>,</p>
-      <p>Votre colis a bien été enregistré sur <strong>TransPro CI</strong>. Conservez le code de suivi ci-dessous pour suivre son acheminement.</p>
+      <p>Votre colis a bien été enregistré sur <strong>{APP}</strong>. Conservez le code de suivi ci-dessous pour suivre son acheminement.</p>
       <div class="info-box">
         <div class="info-row"><span class="label">Code de suivi</span><span class="value" style="font-size:18px;font-weight:700;color:#f05a1a;letter-spacing:1px">${p.trackingCode}</span></div>
         <div class="info-row"><span class="label">Description</span><span class="value">${p.description}</span></div>
@@ -511,7 +524,7 @@ export class EmailService {
         <div class="info-row"><span class="label">Montant payé</span><span class="value" style="color:#059669;font-weight:700">${formattedAmount}</span></div>
         <div class="info-row"><span class="label">Valide jusqu'au</span><span class="value">${formattedDate}</span></div>
       </div>
-      <p>Votre espace TransPro CI est pleinement actif. Bonne gestion !</p>
+      <p>Votre espace {APP} est pleinement actif. Bonne gestion !</p>
       <p style="text-align:center"><a href="${dashboardUrl}" class="btn">Accéder au dashboard</a></p>
     `);
   }
@@ -527,7 +540,7 @@ export class EmailService {
       <p>Cela peut être dû à un solde insuffisant, une connexion interrompue ou un refus de l'opérateur.</p>
       <p>Veuillez réessayer depuis votre espace abonnement :</p>
       <p style="text-align:center"><a href="${retryUrl}" class="btn">Réessayer le paiement</a></p>
-      <p style="color:#6b7280;font-size:13px">Si le problème persiste, contactez notre support : <a href="mailto:support@transpro.ci">support@transpro.ci</a></p>
+      <p style="color:#6b7280;font-size:13px">Si le problème persiste, contactez notre support : <a href="mailto:support@{DOMAIN}">support@{DOMAIN}</a></p>
     `);
   }
 
@@ -565,7 +578,7 @@ export class EmailService {
       </div>
       <p>Merci de vérifier vos coordonnées bancaires et de les mettre à jour si nécessaire, puis de contacter notre équipe.</p>
       <p style="text-align:center"><a href="${p.dashboardUrl}" class="btn">Accéder à mon espace</a></p>
-      <p style="color:#6b7280;font-size:13px">Support : <a href="mailto:support@transpro.ci">support@transpro.ci</a></p>
+      <p style="color:#6b7280;font-size:13px">Support : <a href="mailto:support@{DOMAIN}">support@{DOMAIN}</a></p>
     `);
   }
 }
