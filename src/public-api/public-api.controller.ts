@@ -9,6 +9,7 @@ import { ApiUsageInterceptor } from '../common/interceptors/api-usage.intercepto
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 import { RequireScope } from '../common/decorators/require-scope.decorator';
 import { CreateExtBookingDto } from './dto/ext-booking.dto';
+import { CreateExtParcelDto } from './dto/ext-parcel.dto';
 import { SCOPE } from '@transpro/shared';
 
 @ApiTags('API Publique (tiers)')
@@ -55,6 +56,13 @@ export class PublicApiController {
     return this.service.getTrip(id, req.apiConsumer?.tenantId ?? undefined);
   }
 
+  @Get('trips/:id/seats')
+  @RequireScope(SCOPE.TRIPS_READ)
+  @ApiOperation({ summary: 'Plan de salle : sièges et disponibilité d\'un voyage' })
+  getTripSeats(@Param('id') id: string, @Req() req: any) {
+    return this.service.getTripSeats(id, req.apiConsumer?.tenantId ?? undefined);
+  }
+
   // ── Gares & Itinéraires ────────────────────────────────────────────────────
 
   @Get('stations')
@@ -91,7 +99,93 @@ export class PublicApiController {
     );
   }
 
+  // ── Villes, compagnies, plannings & avis ────────────────────────────────────
+
+  @Get('cities')
+  @RequireScope(SCOPE.CITIES_READ)
+  @ApiOperation({ summary: 'Lister les villes desservies' })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'offset', required: false })
+  listCities(@Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.service.listCities(limit ? parseInt(limit, 10) : undefined, offset ? parseInt(offset, 10) : undefined);
+  }
+
+  @Get('companies')
+  @RequireScope(SCOPE.COMPANIES_READ)
+  @ApiOperation({ summary: 'Lister les compagnies exposées sur l\'API' })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'offset', required: false })
+  listCompanies(@Req() req: any, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.service.listCompanies(
+      req.apiConsumer?.tenantId ?? undefined,
+      limit ? parseInt(limit, 10) : undefined,
+      offset ? parseInt(offset, 10) : undefined,
+    );
+  }
+
+  @Get('schedules')
+  @RequireScope(SCOPE.SCHEDULES_READ)
+  @ApiOperation({ summary: 'Lister les plannings (départs récurrents)' })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'offset', required: false })
+  listSchedules(@Req() req: any, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.service.listSchedules(
+      req.apiConsumer?.tenantId ?? undefined,
+      limit ? parseInt(limit, 10) : undefined,
+      offset ? parseInt(offset, 10) : undefined,
+    );
+  }
+
+  @Get('ratings')
+  @RequireScope(SCOPE.RATINGS_READ)
+  @ApiOperation({ summary: 'Lister les avis passagers (optionnellement par compagnie)' })
+  @ApiQuery({ name: 'company', required: false, description: 'Slug de compagnie' })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'offset', required: false })
+  listRatings(
+    @Req() req: any,
+    @Query('company') company?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.service.listRatings({
+      tenantId: req.apiConsumer?.tenantId ?? undefined,
+      company,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  // ── Promotions ──────────────────────────────────────────────────────────────
+
+  @Get('promotions/:code')
+  @RequireScope(SCOPE.PROMOTIONS_READ)
+  @ApiOperation({ summary: 'Valider un code promo' })
+  validatePromo(@Param('code') code: string, @Req() req: any) {
+    return this.service.validatePromo(code, req.apiConsumer?.tenantId ?? undefined);
+  }
+
   // ── Réservations ───────────────────────────────────────────────────────────
+
+  @Get('bookings')
+  @RequireScope(SCOPE.BOOKINGS_READ)
+  @ApiOperation({ summary: 'Lister les réservations créées via votre intégration' })
+  @ApiQuery({ name: 'phone', required: false, description: 'Filtrer par téléphone passager' })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'offset', required: false })
+  listBookings(
+    @Req() req: any,
+    @Query('phone') phone?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.service.listBookings({
+      apiConsumerId: req.apiConsumer?.id,
+      phone,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
 
   @Post('bookings')
   @RequireScope(SCOPE.BOOKINGS_WRITE)
@@ -116,7 +210,50 @@ export class PublicApiController {
     return this.service.getBookingByReference(reference, req.apiConsumer?.tenantId ?? undefined);
   }
 
+  @Get('bookings/:reference/tickets')
+  @RequireScope(SCOPE.BOOKINGS_READ)
+  @ApiOperation({ summary: 'Billets (QR codes) d\'une réservation confirmée' })
+  getBookingTickets(@Param('reference') reference: string, @Req() req: any) {
+    return this.service.getBookingTickets(reference, req.apiConsumer?.tenantId ?? undefined);
+  }
+
+  @Post('bookings/:reference/cancel')
+  @RequireScope(SCOPE.BOOKINGS_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Annuler une réservation (créée via votre intégration)' })
+  cancelBooking(@Param('reference') reference: string, @Req() req: any) {
+    return this.service.cancelBooking(reference, req.apiConsumer?.tenantId ?? undefined, req.apiConsumer?.id);
+  }
+
+  @Post('bookings/:reference/pay')
+  @RequireScope(SCOPE.BOOKINGS_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Relancer le paiement d\'une réservation en attente' })
+  payBooking(@Param('reference') reference: string, @Req() req: any) {
+    return this.service.payBooking(reference, req.apiConsumer?.tenantId ?? undefined);
+  }
+
   // ── Colis ──────────────────────────────────────────────────────────────────
+
+  @Post('parcels/quote')
+  @RequireScope(SCOPE.PARCELS_READ)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Estimer le tarif d\'un colis' })
+  quoteParcel(@Body() body: { tripId: string; weightKg: number }, @Req() req: any) {
+    return this.service.quoteParcel(body?.tripId, Number(body?.weightKg), req.apiConsumer?.tenantId ?? undefined);
+  }
+
+  @Post('parcels')
+  @RequireScope(SCOPE.PARCELS_WRITE)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Enregistrer un colis sur un voyage' })
+  createParcel(@Body() body: CreateExtParcelDto, @Req() req: any) {
+    return this.service.createParcel({
+      ...body,
+      tenantId: req.apiConsumer?.tenantId ?? undefined,
+      isTest: req.apiEnvironment === 'TEST',
+    });
+  }
 
   @Get('parcels/:code')
   @RequireScope(SCOPE.PARCELS_READ)

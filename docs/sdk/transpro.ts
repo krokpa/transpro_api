@@ -95,6 +95,9 @@ export class TransProClient {
   getTrip(id: string) {
     return this.request<any>('GET', `/ext/trips/${encodeURIComponent(id)}`);
   }
+  getTripSeats(id: string) {
+    return this.request<any>('GET', `/ext/trips/${encodeURIComponent(id)}/seats`);
+  }
 
   // ── Gares & itinéraires ──────────────────────────────────────────────────────
   listStations(p: Paginated = {}) {
@@ -104,6 +107,23 @@ export class TransProClient {
     return this.request<any[]>('GET', '/ext/routes', { query: p });
   }
 
+  // ── Villes, compagnies, plannings & avis ─────────────────────────────────────
+  listCities(p: Paginated = {}) {
+    return this.request<any[]>('GET', '/ext/cities', { query: p });
+  }
+  listCompanies(p: Paginated = {}) {
+    return this.request<any[]>('GET', '/ext/companies', { query: p });
+  }
+  listSchedules(p: Paginated = {}) {
+    return this.request<any[]>('GET', '/ext/schedules', { query: p });
+  }
+  listRatings(p: { company?: string } & Paginated = {}) {
+    return this.request<any[]>('GET', '/ext/ratings', { query: p });
+  }
+  validatePromo(code: string) {
+    return this.request<any>('GET', `/ext/promotions/${encodeURIComponent(code)}`);
+  }
+
   // ── Réservations ─────────────────────────────────────────────────────────────
   createBooking(
     body: { tripId: string; passengerName: string; passengerPhone: string; passengerEmail?: string; seatNumbers: string[] },
@@ -111,11 +131,37 @@ export class TransProClient {
   ) {
     return this.request<any>('POST', '/ext/bookings', { body, idempotencyKey: opts.idempotencyKey });
   }
+  listBookings(p: { phone?: string } & Paginated = {}) {
+    return this.request<any[]>('GET', '/ext/bookings', { query: p });
+  }
   getBooking(reference: string) {
     return this.request<any>('GET', `/ext/bookings/${encodeURIComponent(reference)}`);
   }
+  getBookingTickets(reference: string) {
+    return this.request<any>('GET', `/ext/bookings/${encodeURIComponent(reference)}/tickets`);
+  }
+  cancelBooking(reference: string) {
+    return this.request<any>('POST', `/ext/bookings/${encodeURIComponent(reference)}/cancel`);
+  }
+  payBooking(reference: string) {
+    return this.request<any>('POST', `/ext/bookings/${encodeURIComponent(reference)}/pay`);
+  }
 
   // ── Colis ────────────────────────────────────────────────────────────────────
+  quoteParcel(body: { tripId: string; weightKg: number }) {
+    return this.request<any>('POST', '/ext/parcels/quote', { body });
+  }
+  createParcel(
+    body: {
+      tripId: string; senderName: string; senderPhone: string; senderEmail?: string;
+      recipientName: string; recipientPhone: string; recipientEmail?: string;
+      deliveryCity: string; description: string; weightKg: number;
+      declaredValue?: number; fragile?: boolean;
+    },
+    opts: { idempotencyKey?: string } = {},
+  ) {
+    return this.request<any>('POST', '/ext/parcels', { body, idempotencyKey: opts.idempotencyKey });
+  }
   trackParcel(code: string) {
     return this.request<any>('GET', `/ext/parcels/${encodeURIComponent(code)}`);
   }

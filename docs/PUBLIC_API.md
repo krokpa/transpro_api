@@ -30,7 +30,7 @@ Chaque endpoint exige un **scope**, accordé selon votre **plan**.
 
 | Plan | Quota mensuel | Scopes |
 |------|---------------|--------|
-| `STARTER` | 5 000 req | `trips:read`, `stations:read`, `routes:read`, `parcels:read` |
+| `STARTER` | 5 000 req | toutes les lectures : `trips:read`, `stations:read`, `routes:read`, `cities:read`, `companies:read`, `schedules:read`, `ratings:read`, `promotions:read`, `parcels:read` |
 | `BUSINESS` | 50 000 req | + `bookings:read`, `bookings:write`, `parcels:write` |
 | `ENTERPRISE` | illimité | tous |
 
@@ -80,15 +80,21 @@ données.
 
 ## 5. Endpoints
 
-### Voyages
+### Voyages & sièges
 - `GET /ext/trips` — Rechercher des voyages
   - Query : `origin`, `destination`, `date` (YYYY-MM-DD), `passengers`, `limit` (≤100), `offset`
   - Scope : `trips:read`
 - `GET /ext/trips/:id` — Détails d'un voyage — Scope : `trips:read`
+- `GET /ext/trips/:id/seats` — Plan de salle (sièges + disponibilité) — Scope : `trips:read`
 
-### Gares & itinéraires
+### Gares, itinéraires, villes & compagnies
 - `GET /ext/stations` — Gares actives (`limit`, `offset`) — Scope : `stations:read`
 - `GET /ext/routes` — Itinéraires actifs (`limit`, `offset`) — Scope : `routes:read`
+- `GET /ext/cities` — Villes desservies (`limit`, `offset`) — Scope : `cities:read`
+- `GET /ext/companies` — Compagnies exposées (`limit`, `offset`) — Scope : `companies:read`
+
+### Plannings
+- `GET /ext/schedules` — Départs récurrents (`limit`, `offset`) — Scope : `schedules:read`
 
 ### Réservations
 - `POST /ext/bookings` — Créer une réservation — Scope : `bookings:write`
@@ -103,12 +109,22 @@ données.
     "seatNumbers": ["A1", "A2"]
   }
   ```
-  > La réservation est créée au statut `PENDING` (expire après 15 min).
-  > Le déclenchement du paiement via API est prévu en **Phase 2**.
+  > La réservation est créée au statut `PENDING` (expire après 15 min) et renvoie
+  > un lien `payment.url`.
+- `GET /ext/bookings` — Lister vos réservations (`phone`, `limit`, `offset`) — Scope : `bookings:read`
 - `GET /ext/bookings/:reference` — Récupérer une réservation — Scope : `bookings:read`
+- `GET /ext/bookings/:reference/tickets` — Billets + QR codes — Scope : `bookings:read`
+- `POST /ext/bookings/:reference/cancel` — Annuler (vos réservations) — Scope : `bookings:write`
+- `POST /ext/bookings/:reference/pay` — Relancer le paiement (PENDING) — Scope : `bookings:write`
 
 ### Colis
+- `POST /ext/parcels/quote` — Estimer le tarif (`tripId`, `weightKg`) — Scope : `parcels:read`
+- `POST /ext/parcels` — Enregistrer un colis — Scope : `parcels:write`
 - `GET /ext/parcels/:code` — Suivre un colis par code de tracking — Scope : `parcels:read`
+
+### Avis & promotions
+- `GET /ext/ratings` — Avis passagers (`company`, `limit`, `offset`) — Scope : `ratings:read`
+- `GET /ext/promotions/:code` — Valider un code promo — Scope : `promotions:read`
 
 ### Méta
 - `GET /ext/me` — Infos sur le consumer et la clé courante
@@ -123,10 +139,12 @@ de signature `whsec_…` est généré ; il sert à vérifier l'authenticité de
 ### Événements
 | Événement | Déclencheur |
 |-----------|-------------|
+| `BOOKING_CREATED` | Réservation initiée (paiement en attente) |
 | `BOOKING_CONFIRMED` | Paiement d'une réservation confirmé |
 | `BOOKING_CANCELLED` | Réservation annulée (expiration de paiement ou voyage annulé) |
 | `TRIP_DELAYED` | Voyage retardé |
 | `TRIP_CANCELLED` | Voyage annulé par la compagnie |
+| `PARCEL_REGISTERED` | Nouveau colis enregistré (diffusé aux intégrations de la compagnie) |
 | `PARCEL_STATUS_CHANGED` | Statut d'un colis modifié (diffusé aux intégrations de la compagnie) |
 
 ### Format de l'appel (POST vers votre URL)
