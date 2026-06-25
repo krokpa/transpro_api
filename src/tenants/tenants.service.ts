@@ -563,6 +563,11 @@ export class TenantsService {
       revenueThisMonth,
       totalTrips,
       recentTenants,
+      apiConsumersTotal,
+      apiConsumersPending,
+      apiConsumersApproved,
+      developersTotal,
+      publicApiTenants,
     ] = await Promise.all([
       this.prisma.tenant.count(),
       this.prisma.tenant.count({ where: { status: 'ACTIVE' } }),
@@ -582,15 +587,21 @@ export class TenantsService {
         take: 5,
         select: { id: true, name: true, slug: true, plan: true, status: true, createdAt: true },
       }),
+      this.prisma.apiConsumer.count(),
+      this.prisma.apiConsumer.count({ where: { accessStatus: 'PENDING' } }),
+      this.prisma.apiConsumer.count({ where: { accessStatus: 'APPROVED' } }),
+      this.prisma.user.count({ where: { role: 'DEVELOPER' } }),
+      this.prisma.tenant.count({ where: { publicApiEnabled: true } }),
     ]);
 
     return {
-      tenants: { total: totalTenants, active: activeTenants, trial: trialTenants, suspended: suspendedTenants, newThisMonth: newTenantsThisMonth },
+      tenants: { total: totalTenants, active: activeTenants, trial: trialTenants, suspended: suspendedTenants, newThisMonth: newTenantsThisMonth, publicApi: publicApiTenants },
       users: { total: totalUsers },
       bookings: { confirmed: totalBookings },
       revenue: { total: totalRevenue._sum.amount ?? 0, thisMonth: revenueThisMonth._sum.amount ?? 0 },
       trips: { total: totalTrips },
       recentTenants,
+      api: { consumers: apiConsumersTotal, pending: apiConsumersPending, approved: apiConsumersApproved, developers: developersTotal },
     };
   }
 
