@@ -12,6 +12,8 @@ export interface Brand {
   tagline: string;
   primaryColor: string;
   logoUrl: string | null;
+  faviconUrl: string | null;
+  ogImageUrl: string | null;
   /** Adresse d'expéditeur des emails, ex. "noreply@acme.com". */
   emailFrom: string;
   /** Domaine de marque, ex. "acme.com" (emails synthétiques, liens). */
@@ -61,6 +63,8 @@ export class PlatformSettingsService {
       tagline:      s.tagline,
       primaryColor: s.primaryColor,
       logoUrl:      s.logoUrl,
+      faviconUrl:   s.faviconUrl,
+      ogImageUrl:   s.ogImageUrl,
       emailFrom:    this.config.get<string>('MAIL_FROM', `noreply@${domain}`),
       domain,
     };
