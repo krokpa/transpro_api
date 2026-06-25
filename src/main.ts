@@ -71,11 +71,16 @@ async function bootstrap() {
 
   // ── Doc développeur publique (API tierce /ext uniquement) ───────────────────
   // Exposée dans tous les environnements : c'est la doc destinée aux partenaires.
+  const frontendUrl = config.get('FRONTEND_URL', 'http://localhost:3000');
   const devDocConfig = new DocumentBuilder()
     .setTitle('TransPro — API Partenaires')
     .setDescription(
       [
         'API publique TransPro pour les applications tierces.',
+        '',
+        `**Démarrer** : créez un compte développeur sur [${frontendUrl}/developer/register](${frontendUrl}/developer/register) ` +
+          `puis générez vos clés dans la [console développeur](${frontendUrl}/developer/console). ` +
+          `Déjà inscrit ? [Connexion](${frontendUrl}/developer/login).`,
         '',
         '**Authentification** : envoyez votre clé dans le header `X-API-Key`.',
         '**Quotas** : voir les headers `X-RateLimit-*` de chaque réponse.',
@@ -85,6 +90,7 @@ async function bootstrap() {
       ].join('\n'),
     )
     .setVersion('1.0')
+    .setExternalDoc('Espace développeur (inscription & clés)', `${frontendUrl}/developer/register`)
     .addApiKey(
       { type: 'apiKey', name: 'X-API-Key', in: 'header' },
       'X-API-Key',
