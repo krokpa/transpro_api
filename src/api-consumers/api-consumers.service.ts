@@ -121,12 +121,18 @@ export class ApiConsumersService {
     if (!consumer) throw new NotFoundException('Consommateur introuvable');
     this.assertAccess(consumer, actorRole, actorTenantId, actorUserId);
 
+    // SÉCURITÉ : plan & statut ne sont modifiables QUE par le super-admin.
+    // Le plan change normalement via la facturation (subscribe → Genius Pay) ;
+    // sans ce garde-fou, un DEVELOPER/COMPANY_OWNER pourrait se passer en
+    // ENTERPRISE gratuitement ou réactiver un consumer suspendu.
+    const isAdmin = actorRole === 'SUPER_ADMIN';
+
     return this.prisma.apiConsumer.update({
       where: { id },
       data: {
         ...(dto.name       !== undefined && { name:       dto.name }),
-        ...(dto.plan       !== undefined && { plan:       dto.plan }),
-        ...(dto.status     !== undefined && { status:     dto.status }),
+        ...(isAdmin && dto.plan   !== undefined && { plan:   dto.plan }),
+        ...(isAdmin && dto.status !== undefined && { status: dto.status }),
         ...(dto.webhookUrl !== undefined && { webhookUrl: dto.webhookUrl }),
         // Génère un secret si une URL webhook est définie et qu'aucun n'existe encore.
         ...(dto.webhookUrl && !consumer.webhookSecret && {

@@ -1,6 +1,6 @@
 import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { TenantPlan, TenantStatus } from '@transpro/shared';
 
 export class CreateTenantDto {
@@ -121,3 +121,11 @@ export class UpdateTenantDto {
   @IsBoolean()
   publicApiEnabled?: boolean;
 }
+
+/**
+ * DTO de mise à jour par la compagnie elle-même (PATCH /tenants/me).
+ * Exclut `plan` et `status` : ces champs sont gérés par la facturation / le
+ * super-admin uniquement. Sans cette restriction, un COMPANY_OWNER pourrait
+ * changer son propre plan (gratuitement) ou se réactiver (escalade de privilèges).
+ */
+export class UpdateTenantSelfDto extends OmitType(UpdateTenantDto, ['plan', 'status'] as const) {}

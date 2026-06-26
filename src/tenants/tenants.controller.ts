@@ -13,7 +13,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TenantsService } from './tenants.service';
 import { PlanLimitsService } from '../common/plan-limits.service';
-import { CreateTenantDto, UpdateTenantDto } from './dto/tenant.dto';
+import { CreateTenantDto, UpdateTenantDto, UpdateTenantSelfDto } from './dto/tenant.dto';
 import { UpdateDocumentBrandingDto } from './dto/document-branding.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -74,7 +74,7 @@ export class TenantsController {
   @ApiBearerAuth()
   @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN)
   @ApiOperation({ summary: 'Mettre à jour la compagnie courante' })
-  updateMe(@CurrentUser('tenantId') tenantId: string, @Body() dto: UpdateTenantDto) {
+  updateMe(@CurrentUser('tenantId') tenantId: string, @Body() dto: UpdateTenantSelfDto) {
     return this.tenantsService.update(tenantId, dto);
   }
 
