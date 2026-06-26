@@ -76,7 +76,7 @@ function totalRow(doc: any, cells: string[], cols: { t: string; w: number }[], y
 
 async function buildPdf(
   fn: (doc: any) => void,
-  br?: { logo: Buffer | null; settings: DocumentBrandingSettings },
+  br?: { logo: Buffer | null; settings: DocumentBrandingSettings; appName?: string },
 ): Promise<Buffer> {
   const doc = new PDFDoc({ margin: M, bufferPages: true, size: 'A4' });
   const chunks: Buffer[] = [];
@@ -92,7 +92,7 @@ async function buildPdf(
     if (br?.logo && (br.settings.logoPosition === 'watermark' || br.settings.logoPosition === 'both')) {
       applyWatermark(doc, br.logo, br.settings.watermarkOpacity);
     }
-    const footerLabel = br?.settings.footerText ?? 'TransPro CI';
+    const footerLabel = br?.settings.footerText ?? br?.appName ?? 'TransPro CI';
     doc.fillColor(GR).font('Helvetica').fontSize(7.5).text(
       `${footerLabel}  ·  Page ${i + 1} / ${rng.count}`,
       M, doc.page.height - 26, { width: CW, align: 'center', lineBreak: false },
@@ -114,7 +114,7 @@ export async function buildPdfFromExpenses(params: {
   byCategory: Record<string, number>;
   expenses: any[];
   provisions: any[];
-  branding?: { logo: Buffer | null; settings: DocumentBrandingSettings };
+  branding?: { logo: Buffer | null; settings: DocumentBrandingSettings; appName?: string };
 }): Promise<Buffer> {
   const { stationName, period, cashSales, totalExpenses, totalProvisions, estimatedBalance, byCategory, expenses, provisions, branding } = params;
   const showHeaderLogo = branding?.logo && (branding.settings.logoPosition === 'header' || branding.settings.logoPosition === 'both');

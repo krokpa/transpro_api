@@ -53,7 +53,7 @@ export class OtpService {
       data: { phone, codeHash, expiresAt },
     });
 
-    const message = `TransPro CI - Votre code de vérification est : ${code}. Valable ${OTP_TTL_MINUTES} minutes. Ne le communiquez à personne.`;
+    const message = `{APP} - Votre code de vérification est : ${code}. Valable ${OTP_TTL_MINUTES} minutes. Ne le communiquez à personne.`;
     await this.smsRouter.send(phone, message);
 
     this.logger.log(`OTP envoyé à ${phone}`);

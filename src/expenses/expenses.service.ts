@@ -7,12 +7,14 @@ import * as XLSX from 'xlsx';
 import { StatementOutput, buildPdfFromExpenses, CAT_LBL } from './expenses.pdf';
 import { extractBranding, parseLogo } from '../common/pdf-branding.helper';
 import { StationCashPeriodsService } from '../station-cash-periods/station-cash-periods.service';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 @Injectable()
 export class ExpensesService {
   constructor(
     private prisma: PrismaService,
     private cashPeriods: StationCashPeriodsService,
+    private settings: PlatformSettingsService,
   ) {}
 
   async create(dto: {
@@ -324,6 +326,7 @@ export class ExpensesService {
     }
 
     const brandingSettings = extractBranding(tenantForBranding?.settings);
+    const { appName } = await this.settings.getBrand();
     const buffer = await buildPdfFromExpenses({
       stationName,
       period,
@@ -336,7 +339,7 @@ export class ExpensesService {
       byCategory,
       expenses: expensesRaw,
       provisions: provisionsRaw,
-      branding: { logo: parseLogo(tenantForBranding?.logo), settings: brandingSettings },
+      branding: { logo: parseLogo(tenantForBranding?.logo), settings: brandingSettings, appName },
     });
 
     return {

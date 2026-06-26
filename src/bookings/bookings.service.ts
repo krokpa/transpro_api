@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
+import { SmsRouterService } from '../sms/sms-router.service';
 import { WebhookEvent } from '@prisma/client';
 import { CreateBookingDto, CreateGuichetBookingDto } from './dto/booking.dto';
 import { SocketEvent, BOOKING_EXPIRY_MINUTES, COMMISSION_RATE, NotificationType, PaymentMethod } from '@transpro/shared';
@@ -29,6 +30,7 @@ export class BookingsService {
     private notifications: NotificationsService,
     private config: ConfigService,
     private webhooks: WebhooksService,
+    private sms: SmsRouterService,
   ) {
     const key = this.config.get<string>('ENCRYPTION_KEY');
     if (!key) throw new Error('[BookingsService] ENCRYPTION_KEY manquante — démarrage refusé');
@@ -366,6 +368,82 @@ export class BookingsService {
     return booking;
   }
 
+  /**
+   * Récupération publique d'un billet par sa référence (vente guichet, lien SMS).
+   * Aucune auth : la référence aléatoire fait office de jeton. Forme réduite —
+   * pas de PII passager ni de détails de paiement, uniquement de quoi afficher
+   * et présenter le(s) QR à l'embarquement.
+   */
+  async findPublicByReference(reference: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { reference: reference.trim() },
+      include: {
+        trip: {
+          include: {
+            route: { select: { originCity: { select: { name: true } }, destinationCity: { select: { name: true } } } },
+            tenant: { select: { name: true, logo: true } },
+            departureStation: { select: { name: true } },
+          },
+        },
+        tickets: { orderBy: { seatNumber: 'asc' }, select: { seatNumber: true, qrCode: true, qrCodeData: true } },
+      },
+    });
+    if (!booking) throw new NotFoundException('Billet introuvable. Vérifiez la référence.');
+
+    const t: any = booking.trip;
+    return {
+      reference:    booking.reference,
+      status:       booking.status,
+      seatNumbers:  booking.seatNumbers,
+      totalAmount:  booking.totalAmount,
+      currency:     booking.currency,
+      trip: {
+        originCity:      t?.route?.originCity?.name ?? null,
+        destinationCity: t?.route?.destinationCity?.name ?? null,
+        departureAt:     t?.departureAt ?? null,
+        tripClass:       t?.tripClass ?? null,
+        departureStation: t?.departureStation?.name ?? null,
+        companyName:     t?.tenant?.name ?? null,
+        companyLogo:     t?.tenant?.logo ?? null,
+      },
+      tickets: booking.tickets,
+    };
+  }
+
+  /** Lien public de récupération du billet (page web universelle). */
+  private ticketLink(reference: string): string {
+    const base = (this.config.get<string>('FRONTEND_URL') || this.config.get<string>('APP_URL') || '').replace(/\/$/, '');
+    return base ? `${base}/ticket/${reference}` : '';
+  }
+
+  /** Envoie (ou renvoie) au passager un SMS de récupération de billet. */
+  private async sendTicketSms(phone: string, booking: any): Promise<void> {
+    const ref    = booking.reference as string;
+    const link   = this.ticketLink(ref);
+    const origin = booking?.trip?.route?.originCity?.name ?? '';
+    const dest   = booking?.trip?.route?.destinationCity?.name ?? '';
+    const dep    = booking?.trip?.departureAt ? dayjs(booking.trip.departureAt).format('DD/MM HH:mm') : '';
+    const trajet = origin && dest ? `${origin}-${dest} ` : '';
+    const depTxt = dep ? `, depart ${dep}` : '';
+    const message = link
+      ? `{APP}: billet confirme ${trajet}ref ${ref}${depTxt}. Votre billet: ${link}`
+      : `{APP}: billet confirme ${trajet}ref ${ref}${depTxt}. Presentez la reference ${ref} a l'embarquement.`;
+    await this.sms.send(phone, message);
+  }
+
+  /** Renvoi du SMS de billet par un agent/owner (ex. client sans app, numéro saisi après-coup). */
+  async resendTicketSms(bookingId: string, tenantId: string, phone: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: bookingId, tenantId },
+      include: {
+        trip: { include: { route: { select: { originCity: { select: { name: true } }, destinationCity: { select: { name: true } } } } } },
+      },
+    });
+    if (!booking) throw new NotFoundException('Réservation introuvable');
+    await this.sendTicketSms(phone, booking);
+    return { sent: true, reference: booking.reference };
+  }
+
   async rateBooking(bookingId: string, passengerId: string, dto: { rating: number; comment?: string }) {
     const booking = await this.prisma.booking.findFirst({
       where: { id: bookingId, passengerId, status: 'COMPLETED' },
@@ -588,7 +666,7 @@ export class BookingsService {
       companyLogo: (trip.tenant as any)?.logo ?? undefined,
     }).catch(() => {});
 
-    return this.prisma.booking.findUnique({
+    const full = await this.prisma.booking.findUnique({
       where: { id: booking.id },
       include: {
         passenger: { select: { firstName: true, lastName: true, phone: true, email: true } },
@@ -602,6 +680,14 @@ export class BookingsService {
         payment: { select: { method: true, status: true, paidAt: true } },
       },
     });
+
+    // SMS de récupération (lien web universel) si un numéro a été fourni.
+    // Fire-and-forget : ne jamais bloquer/échouer la vente sur un souci SMS.
+    if (dto.phone) {
+      this.sendTicketSms(dto.phone, full).catch(() => {});
+    }
+
+    return full;
   }
 
   async updateStatus(bookingId: string, tenantId: string, status: string) {

@@ -6,12 +6,13 @@ import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@transpro/shared';
 import * as XLSX from 'xlsx';
 import { DocumentBrandingSettings, extractBranding, parseLogo, drawHeaderLogo, applyWatermark } from '../common/pdf-branding.helper';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDoc = require('pdfkit') as typeof import('pdfkit');
 
 // ─── Shared PDF helpers (inline, minimal) ────────────────────────────────────
 const M = 40; const CW = 515; const DARK = '#1e293b'; const GR = '#6b7280'; const LT = '#f8fafc';
-type PdfBranding = { logo: Buffer | null; settings: DocumentBrandingSettings };
+type PdfBranding = { logo: Buffer | null; settings: DocumentBrandingSettings; appName?: string };
 function fmtXOF(n: number) { return `${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`; }
 function fmtD(d: Date | string) { return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
 function pdfHdr(doc: any, title: string, sub: string, company: string, logoBuffer?: Buffer | null) {
@@ -77,7 +78,7 @@ async function buildPdf(fn: (doc: any) => void, br?: PdfBranding): Promise<Buffe
     if (br?.logo && (br.settings.logoPosition === 'watermark' || br.settings.logoPosition === 'both')) {
       applyWatermark(doc, br.logo, br.settings.watermarkOpacity);
     }
-    const footerLabel = br?.settings.footerText ?? 'TransPro CI';
+    const footerLabel = br?.settings.footerText ?? br?.appName ?? 'TransPro CI';
     doc.fillColor(GR).font('Helvetica').fontSize(7.5).text(
       `${footerLabel}  ·  Page ${i + 1} / ${rng.count}`,
       M, doc.page.height - 26, { width: CW, align: 'center', lineBreak: false },
@@ -96,6 +97,7 @@ export class SettlementsService {
     private prisma: PrismaService,
     private email: EmailService,
     private config: ConfigService,
+    private settings: PlatformSettingsService,
   ) {}
 
   @Cron('0 2 1 * *')
@@ -393,7 +395,11 @@ export class SettlementsService {
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'Compagnie';
     const period  = from === to ? from : `${from} → ${to}`;
-    const br: PdfBranding = { logo: parseLogo((tenant as any)?.logo), settings: extractBranding((tenant as any)?.settings) };
+    const br: PdfBranding = {
+      logo: parseLogo((tenant as any)?.logo),
+      settings: extractBranding((tenant as any)?.settings),
+      appName: (await this.settings.getBrand()).appName,
+    };
     const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     const totalGross = settlements.reduce((s, r) => s + r.totalAmount, 0);

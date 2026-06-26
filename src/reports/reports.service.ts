@@ -8,6 +8,7 @@ import {
   extractBranding,
   parseLogo,
 } from '../common/pdf-branding.helper';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDoc = require('pdfkit') as typeof import('pdfkit');
@@ -168,7 +169,7 @@ function pdfTotalRow(doc: any, cells: string[], cols: { text: string; width: num
   return y + rowH;
 }
 
-type PdfBranding = { logo: Buffer | null; settings: DocumentBrandingSettings };
+type PdfBranding = { logo: Buffer | null; settings: DocumentBrandingSettings; appName?: string };
 
 function pdfFooter(doc: any, br?: PdfBranding) {
   const range = doc.bufferedPageRange();
@@ -177,7 +178,7 @@ function pdfFooter(doc: any, br?: PdfBranding) {
     if (br?.logo && (br.settings.logoPosition === 'watermark' || br.settings.logoPosition === 'both')) {
       applyWatermark(doc, br.logo, br.settings.watermarkOpacity);
     }
-    const footerLabel = br?.settings.footerText ?? 'TransPro CI';
+    const footerLabel = br?.settings.footerText ?? br?.appName ?? 'TransPro CI';
     doc.fillColor(GRAY).font('Helvetica').fontSize(8).text(
       `${footerLabel}  ·  Page ${i + 1} / ${range.count}`,
       MARGIN,
@@ -220,7 +221,19 @@ export interface ReportOutput {
 
 @Injectable()
 export class ReportsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private settings: PlatformSettingsService,
+  ) {}
+
+  /** Branding PDF d'un tenant + nom de marque plateforme (pied de page white-label). */
+  private async pdfBranding(tenant: any): Promise<PdfBranding> {
+    return {
+      logo: parseLogo(tenant?.logo),
+      settings: extractBranding(tenant?.settings),
+      appName: (await this.settings.getBrand()).appName,
+    };
+  }
 
   // ── Daily Sales ────────────────────────────────────────────────────────────
   async dailySales(userId: string, tenantId: string, dateStr: string, format: 'pdf' | 'csv'): Promise<ReportOutput> {
@@ -243,7 +256,7 @@ export class ReportsService {
     ]);
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
-    const br: PdfBranding = { logo: parseLogo((tenant as any)?.logo), settings: extractBranding((tenant as any)?.settings) };
+    const br: PdfBranding = await this.pdfBranding(tenant);
     const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
     const confirmed = bookings.filter(b => b.status === 'CONFIRMED' || b.status === 'COMPLETED');
     const cancelled = bookings.filter(b => b.status === 'CANCELLED');
@@ -338,7 +351,7 @@ export class ReportsService {
     ]);
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
-    const br: PdfBranding = { logo: parseLogo((tenant as any)?.logo), settings: extractBranding((tenant as any)?.settings) };
+    const br: PdfBranding = await this.pdfBranding(tenant);
     const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     const days = Array.from({ length: 7 }, (_, i) => {
@@ -429,7 +442,7 @@ export class ReportsService {
     if (!trip) throw new NotFoundException('Voyage introuvable');
 
     const company = (tenant as any)?.sigle ?? tenant?.name ?? 'TransPro CI';
-    const br: PdfBranding = { logo: parseLogo((tenant as any)?.logo), settings: extractBranding((tenant as any)?.settings) };
+    const br: PdfBranding = await this.pdfBranding(tenant);
     const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     type SeatRow = { seat: string; name: string; phone: string; ref: string; amount: number; method: string };
@@ -547,7 +560,7 @@ export class ReportsService {
     const confirmed = bookings.filter(b => b.status === 'CONFIRMED' || b.status === 'COMPLETED');
     const cancelled = bookings.filter(b => b.status === 'CANCELLED');
     const totalRevenue = confirmed.reduce((s, b) => s + b.totalAmount, 0);
-    const br: PdfBranding = { logo: parseLogo(tenantForBr?.logo), settings: extractBranding(tenantForBr?.settings) };
+    const br: PdfBranding = await this.pdfBranding(tenantForBr);
     const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     const cols = [
@@ -633,7 +646,7 @@ export class ReportsService {
 
     if (!station) throw new NotFoundException('Gare introuvable');
     const stationLabel = station.code ? `${station.name} (${station.code})` : station.name;
-    const br: PdfBranding = { logo: parseLogo(tenantForBr?.logo), settings: extractBranding(tenantForBr?.settings) };
+    const br: PdfBranding = await this.pdfBranding(tenantForBr);
     const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     const days = Array.from({ length: 7 }, (_, i) => {
@@ -738,7 +751,7 @@ export class ReportsService {
     if (!trip) throw new NotFoundException('Voyage introuvable');
 
     const stationLabel = station.code ? `${station.name} (${station.code})` : station.name;
-    const br: PdfBranding = { logo: parseLogo(tenantForBr?.logo), settings: extractBranding(tenantForBr?.settings) };
+    const br: PdfBranding = await this.pdfBranding(tenantForBr);
     const hdrLogo = br.logo && (br.settings.logoPosition === 'header' || br.settings.logoPosition === 'both') ? br.logo : null;
 
     type SeatRow = { seat: string; name: string; phone: string; ref: string; amount: number; method: string };

@@ -1,10 +1,13 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto, CreateGuichetBookingDto, UpdateBookingStatusDto } from './dto/booking.dto';
 import { RateBookingDto } from './dto/rate-booking.dto';
+import { ResendTicketSmsDto } from './dto/resend-ticket-sms.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@transpro/shared';
@@ -31,6 +34,26 @@ export class BookingsController {
     @Body() dto: CreateGuichetBookingDto,
   ) {
     return this.bookings.createGuichet(tenantId, agentId, dto);
+  }
+
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } }) // 20 consultations/min/IP
+  @Get('public/:reference')
+  @ApiOperation({ summary: 'Récupérer un billet par sa référence (public — vente guichet, lien SMS)' })
+  publicTicket(@Param('reference') reference: string) {
+    return this.bookings.findPublicByReference(reference);
+  }
+
+  @Post(':id/send-ticket-sms')
+  @Roles(UserRole.COMPANY_OWNER, UserRole.COMPANY_ADMIN, UserRole.COMPANY_AGENT)
+  @ApiOperation({ summary: 'Renvoyer le SMS de récupération du billet au passager' })
+  sendTicketSms(
+    @Param('id') id: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @Body() dto: ResendTicketSmsDto,
+  ) {
+    return this.bookings.resendTicketSms(id, tenantId, dto.phone);
   }
 
   @Get('my')

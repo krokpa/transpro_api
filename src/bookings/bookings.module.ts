@@ -7,9 +7,10 @@ import { PaymentsModule } from '../payments/payments.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PushModule } from '../push/push.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
+import { SmsModule } from '../sms/sms.module';
 
 @Module({
-  imports: [ConfigModule, RealtimeModule, PaymentsModule, NotificationsModule, PushModule, WebhooksModule],
+  imports: [ConfigModule, RealtimeModule, PaymentsModule, NotificationsModule, PushModule, WebhooksModule, SmsModule],
   controllers: [BookingsController],
   providers: [BookingsService],
   exports: [BookingsService],

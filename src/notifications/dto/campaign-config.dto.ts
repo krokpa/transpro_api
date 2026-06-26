@@ -14,7 +14,7 @@ export const DEFAULT_CAMPAIGN_CONFIG = {
   morningReminderHour: 7,
   morningReminderMinute: 30,
   morningReminderTitle: 'Bonjour !',
-  morningReminderBody: 'Planifiez votre prochain voyage avec TransPro.',
+  morningReminderBody: 'Planifiez votre prochain voyage dès maintenant.',
   weekendOfferEnabled: false,
   weekendOfferHour: 18,
   weekendOfferMinute: 0,

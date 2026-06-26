@@ -66,7 +66,7 @@ describe('OtpService', () => {
       expect(mockPrisma.phoneOtp.create).toHaveBeenCalledTimes(1);
       expect(mockSmsRouter.send).toHaveBeenCalledWith(
         PHONE,
-        expect.stringContaining('TransPro CI'),
+        expect.stringContaining('{APP}'), // marque substituée dans SmsRouter.send (white-label)
       );
     });
 
